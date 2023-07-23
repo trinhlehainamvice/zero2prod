@@ -1,8 +1,11 @@
+use std::net::TcpListener;
 use zero2prod::run;
 
 #[tokio::test]
 async fn check_health_check() {
-    let app = spawn_app();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind random port");
+    let port = listener.local_addr().unwrap().port();
+    let app = spawn_app(listener);
 
     // tokio spawn background thread an run app
     // We want to hold thread instance until tests finish (or end of function)
@@ -11,7 +14,7 @@ async fn check_health_check() {
 
     let client = reqwest::Client::new();
     let response = client
-        .get("http://127.0.0.1:8000/health_check")
+        .get(&format!("http://127.0.0.1:{}/health_check", port))
         .send()
         .await
         .expect("Failed to execute request");
@@ -20,6 +23,6 @@ async fn check_health_check() {
     assert_eq!(Some(0), response.content_length());
 } // _app_thread is dropped here after all tests are successful
 
-async fn spawn_app() -> std::io::Result<()> {
-    run("127.0.0.1:8000")?.await
+async fn spawn_app(listener: TcpListener) -> std::io::Result<()> {
+    run(listener)?.await
 }

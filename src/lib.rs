@@ -1,14 +1,15 @@
 use actix_web::dev::Server;
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
+use std::net::TcpListener;
 
-pub fn run(addr: &str) -> Result<Server, std::io::Error> {
+pub fn run(listener: TcpListener) -> Result<Server, std::io::Error> {
     let server = HttpServer::new(|| {
         App::new()
             .route("/", web::get().to(greet))
             .route("/health_check", web::get().to(health_check))
             .route("/{name}", web::get().to(greet))
     })
-    .bind(addr)?
+    .listen(listener)?
     .run();
     // server is already running at this point
 
