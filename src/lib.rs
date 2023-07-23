@@ -7,6 +7,7 @@ pub fn run(listener: TcpListener) -> Result<Server, std::io::Error> {
         App::new()
             .route("/", web::get().to(greet))
             .route("/health_check", web::get().to(health_check))
+            .route("/subscriptions", web::post().to(subscribe))
             .route("/{name}", web::get().to(greet))
     })
     .listen(listener)?
@@ -23,5 +24,9 @@ async fn greet(req: HttpRequest) -> impl Responder {
 }
 
 async fn health_check() -> impl Responder {
+    HttpResponse::Ok().finish()
+}
+
+async fn subscribe(_req: HttpRequest) -> impl Responder {
     HttpResponse::Ok().finish()
 }
