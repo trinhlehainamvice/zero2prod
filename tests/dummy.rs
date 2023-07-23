@@ -1,5 +1,5 @@
 use std::net::TcpListener;
-use zero2prod::run;
+use zero2prod::startup::run;
 
 #[tokio::test]
 async fn check_health_check() {
@@ -14,7 +14,7 @@ async fn check_health_check() {
 
     let client = reqwest::Client::new();
     let response = client
-        .get(&format!("http://127.0.0.1:{}/health_check", port))
+        .get(&format!("http://127.0.0.1:{}/health", port))
         .send()
         .await
         .expect("Failed to execute request");
