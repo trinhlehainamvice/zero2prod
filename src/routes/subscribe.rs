@@ -14,7 +14,7 @@ pub async fn subscribe(
     web::Form(subscriber): web::Form<Subscriber>,
     connection: web::Data<PgPool>,
 ) -> impl Responder {
-    let result = sqlx::query!(
+    match sqlx::query!(
         r#"
         INSERT INTO subscriptions (id, email, name, subscribed_at)
         VALUES ($1, $2, $3, $4)
@@ -25,6 +25,12 @@ pub async fn subscribe(
         Utc::now() // need to use timestamptz instead of TIMESTAMP in sql database table
     )
     .execute(connection.as_ref())
-    .await;
-    HttpResponse::Ok().finish()
+    .await
+    {
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(e) => {
+            println!("Failed to execute query: {}", e);
+            HttpResponse::InternalServerError().finish()
+        }
+    }
 }

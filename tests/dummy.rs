@@ -1,6 +1,7 @@
-use sqlx::PgPool;
+use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::net::TcpListener;
-use zero2prod::configuration::Settings;
+use uuid::Uuid;
+use zero2prod::configuration::{DatabaseSettings, Settings};
 use zero2prod::startup::run;
 
 #[tokio::test]
@@ -135,9 +136,7 @@ async fn spawn_app() -> std::io::Result<TestApp> {
     let addr = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
 
     let config = Settings::get_configuration().expect("Failed to read configuration");
-    let db_connection_pool = PgPool::connect(&config.database.get_url())
-        .await
-        .expect("Failed to connect to Postgres");
+    let db_connection_pool = get_test_database(&config.database).await;
     let app = run(listener, db_connection_pool.clone()).expect("Failed to bind address");
 
     // tokio spawn background thread an run app
@@ -149,4 +148,41 @@ async fn spawn_app() -> std::io::Result<TestApp> {
         addr,
         db_connection_pool,
     })
+}
+
+// Test will cause unexpected result if do same test multiple times to the same database
+// So we need to create a branch new test database for each test for isolation
+// Need to manually clean up test database
+async fn get_test_database(database: &DatabaseSettings) -> PgPool {
+    let database_name = Uuid::new_v4().to_string();
+
+    // Create test database
+    let mut connection = PgConnection::connect(&database.get_base_url())
+        .await
+        .expect("Failed to connect to Postgres");
+    connection
+        .execute(format!(r#"CREATE DATABASE "{}";"#, database_name).as_str())
+        .await
+        .expect("Failed to create database");
+
+    let url = format!(
+        "{}://{}:{}@{}:{}/{}",
+        database.protocol,
+        database.username,
+        database.password,
+        database.host,
+        database.port,
+        database_name
+    );
+
+    // Migrate database
+    let connection_pool = PgPool::connect(&url)
+        .await
+        .expect("Failed to connect to Postgres");
+    sqlx::migrate!("./migrations")
+        .run(&connection_pool)
+        .await
+        .expect("Failed to migrate the database");
+
+    connection_pool
 }

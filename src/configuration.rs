@@ -30,6 +30,7 @@ impl ApplicationSettings {
 
 #[derive(serde::Deserialize)]
 pub struct DatabaseSettings {
+    pub protocol: String,
     pub username: String,
     pub password: String,
     pub port: u16,
@@ -38,10 +39,17 @@ pub struct DatabaseSettings {
 }
 
 impl DatabaseSettings {
-    pub fn get_url(&self) -> String {
+    pub fn get_database_url(&self) -> String {
         format!(
-            "postgres://{}:{}@{}:{}/{}",
-            self.username, self.password, self.host, self.port, self.database_name
+            "{}://{}:{}@{}:{}/{}",
+            self.protocol, self.username, self.password, self.host, self.port, self.database_name
+        )
+    }
+
+    pub fn get_base_url(&self) -> String {
+        format!(
+            "{}://{}:{}@{}:{}",
+            self.protocol, self.username, self.password, self.host, self.port
         )
     }
 }
