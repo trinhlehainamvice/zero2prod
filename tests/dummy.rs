@@ -1,3 +1,4 @@
+use env_logger::Env;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::net::TcpListener;
 use uuid::Uuid;
@@ -130,6 +131,8 @@ struct TestApp {
 }
 
 async fn spawn_app() -> std::io::Result<TestApp> {
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+
     // Use port 0 to ask the OS to pick a random free port
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind random port");
     // Then query allocated port by local_addr
