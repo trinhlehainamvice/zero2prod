@@ -11,30 +11,35 @@ pub struct Subscriber {
     email: String,
 }
 
+// Instrument wrap function into a Span
+// Instrument can capture arguments of function, but CAN'T capture local variables
+#[tracing::instrument(
+    name = "Add a new subscriber",
+    skip(subscriber, connection),
+    fields(
+        request_id = %Uuid::new_v4(),
+        name = %subscriber.name,
+        email = %subscriber.email,
+    )
+)]
 pub async fn subscribe(
     web::Form(subscriber): web::Form<Subscriber>,
     connection: web::Data<PgPool>,
 ) -> impl Responder {
-    // When request happens in concurrently, it's hard to find out which request even each request has timestamp
-    // Solve this by attach uuid to each request
-    let req_id = Uuid::new_v4();
+    match insert_subscriber(&subscriber, &connection).await {
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(_) => HttpResponse::InternalServerError().finish(),
+    }
+}
 
-    // Tracing span will scope code structure from enter to exit
-    let request_span = tracing::info_span!(
-        "Register a new subscriber.",
-        request_id = %req_id,
-        name = %subscriber.name,
-        email = %subscriber.email
-    );
-    // Tracing span enter
-    let _enter_span = request_span.enter();
-
-    // Pass Span to Instrument
-    // Instrument handle to enter and exit Span when Future is polled
-    // enter Span when Future is polled at first time
-    // drop Span when Future is polled successfully
-    let query_span = tracing::info_span!("Inserting a new subscriber to database",);
-    match sqlx::query!(
+// Separate sql query into separate function (separation of concerns)
+// This function not dependent on actix-web framework
+#[tracing::instrument(
+    name = "Inserting a new subscriber to database"
+    skip(subscriber, connection)
+)]
+async fn insert_subscriber(subscriber: &Subscriber, connection: &PgPool) -> sqlx::Result<()> {
+    sqlx::query!(
         r#"
         INSERT INTO subscriptions (id, email, name, subscribed_at)
         VALUES ($1, $2, $3, $4)
@@ -42,23 +47,14 @@ pub async fn subscribe(
         Uuid::new_v4(),
         subscriber.email,
         subscriber.name,
-        Utc::now() // need to use timestamptz instead of TIMESTAMP in sql database table
+        Utc::now()
     )
-    .execute(connection.as_ref())
-    // Attach span to instrument tell executor to poll this Future
-    .instrument(query_span)
+    .execute(connection)
     .await
-    {
-        Ok(_) => HttpResponse::Ok().finish(),
-        Err(e) => {
-            tracing::error!(
-                "req_id: {} - Failed to register a new subscriber when querying database: {:?}",
-                req_id,
-                e
-            );
-            HttpResponse::InternalServerError().finish()
-        }
-    }
+    .map_err(|e| {
+        tracing::error!("Failed to execute query: {:?}", e);
+        e
+    })?;
+
+    Ok(())
 }
-// Tracing spans automatically exit when dropped
-// NOTE: to see TRACE message when span dropped, we should set RUST_LOG=trace

@@ -1,3 +1,5 @@
+use secrecy::{ExposeSecret, Secret};
+
 #[derive(serde::Deserialize)]
 pub struct Settings {
     pub application: ApplicationSettings,
@@ -34,7 +36,7 @@ impl ApplicationSettings {
 pub struct DatabaseSettings {
     pub protocol: String,
     pub username: String,
-    pub password: String,
+    pub password: Secret<String>,
     pub port: u16,
     pub host: String,
     pub database_name: String,
@@ -44,14 +46,23 @@ impl DatabaseSettings {
     pub fn get_database_url(&self) -> String {
         format!(
             "{}://{}:{}@{}:{}/{}",
-            self.protocol, self.username, self.password, self.host, self.port, self.database_name
+            self.protocol,
+            self.username,
+            self.password.expose_secret(),
+            self.host,
+            self.port,
+            self.database_name
         )
     }
 
     pub fn get_base_url(&self) -> String {
         format!(
             "{}://{}:{}@{}:{}",
-            self.protocol, self.username, self.password, self.host, self.port
+            self.protocol,
+            self.username,
+            self.password.expose_secret(),
+            self.host,
+            self.port
         )
     }
 }
