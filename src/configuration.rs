@@ -18,6 +18,8 @@ impl Settings {
 
 #[derive(serde::Deserialize)]
 pub struct ApplicationSettings {
+    pub name: String,
+    pub default_log_level: String,
     pub host: String,
     pub port: u16,
 }

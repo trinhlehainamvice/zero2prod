@@ -1,9 +1,10 @@
-use env_logger::Env;
+use once_cell::sync::Lazy;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::net::TcpListener;
 use uuid::Uuid;
 use zero2prod::configuration::{DatabaseSettings, Settings};
 use zero2prod::startup::run;
+use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
 
 #[tokio::test]
 async fn check_health_check() {
@@ -130,8 +131,28 @@ struct TestApp {
     db_connection_pool: PgPool,
 }
 
+static TRACING: Lazy<()> = Lazy::new(|| {
+    let test_name = "test".to_string();
+    let default_log_level = "debug".to_string();
+    if std::env::var("TEST_LOG").is_ok() {
+        init_tracing_subscriber(get_tracing_subscriber(
+            test_name,
+            default_log_level,
+            std::io::stdout,
+        ));
+    } else {
+        init_tracing_subscriber(get_tracing_subscriber(
+            test_name,
+            default_log_level,
+            std::io::sink,
+        ));
+    }
+});
+
 async fn spawn_app() -> std::io::Result<TestApp> {
-    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+    // Lazy mean only run when it is called
+    // once_cell make sure it is only run once on entire program lifetime
+    Lazy::force(&TRACING);
 
     // Use port 0 to ask the OS to pick a random free port
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind random port");
