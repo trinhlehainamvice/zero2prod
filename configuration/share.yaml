@@ -1,8 +1,7 @@
 application:
   name: zero2prod
   default_log_level: info
-  host: 127.0.0.1
-  port: 8080
+  port: 8000
 database:
   protocol: postgres
   username: postgres

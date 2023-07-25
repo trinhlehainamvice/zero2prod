@@ -16,8 +16,8 @@ async fn main() -> std::io::Result<()> {
 
     // Use Pool to handle queue of connections rather than single connection like PgConnection
     // Allow to work with multithreading actix-web runtime
-    let db_connection_pool = PgPool::connect(&settings.database.get_database_url())
-        .await
+    // Use lazy connect to connect to database when needed
+    let db_connection_pool = PgPool::connect_lazy(&settings.database.get_database_url())
         .expect("Failed to connect to Postgres");
     let listener =
         TcpListener::bind(settings.application.get_url()).expect("Failed to bind address");
