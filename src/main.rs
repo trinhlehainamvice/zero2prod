@@ -1,4 +1,4 @@
-use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
 use std::net::TcpListener;
 use zero2prod::configuration::Settings;
 use zero2prod::startup::run;
@@ -17,7 +17,10 @@ async fn main() -> std::io::Result<()> {
     // Use Pool to handle queue of connections rather than single connection like PgConnection
     // Allow to work with multithreading actix-web runtime
     // Use lazy connect to connect to database when needed
-    let db_connection_pool = PgPool::connect_lazy(&settings.database.get_database_url())
+    let db_connection_pool = PgPoolOptions::new()
+        // Limit connection timeout to avoid long wait times
+        .acquire_timeout(std::time::Duration::from_secs(2))
+        .connect_lazy(&settings.database.get_database_url())
         .expect("Failed to connect to Postgres");
     let listener =
         TcpListener::bind(settings.application.get_url()).expect("Failed to bind address");
