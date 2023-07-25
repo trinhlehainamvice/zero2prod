@@ -1,10 +1,10 @@
 use crate::routes::{check_health, subscribe};
 use actix_web::dev::Server;
-use actix_web::middleware::Logger;
 use actix_web::web::Data;
 use actix_web::{web, App, HttpServer};
 use sqlx::PgPool;
 use std::net::TcpListener;
+use tracing_actix_web::TracingLogger;
 
 pub fn run(listener: TcpListener, db_connection_pool: PgPool) -> Result<Server, std::io::Error> {
     // So to share data between threads, actix-web provide web::Data<T>(Arc<T>)
@@ -14,7 +14,7 @@ pub fn run(listener: TcpListener, db_connection_pool: PgPool) -> Result<Server, 
     // Actix-web runtime that have multiple threads
     let server = HttpServer::new(move || {
         App::new()
-            .wrap(Logger::default()) // logger middleware
+            .wrap(TracingLogger::default()) // logger middleware
             .route("/health", web::get().to(check_health))
             .route("/subscriptions", web::post().to(subscribe))
             // Application Context, that store state of application

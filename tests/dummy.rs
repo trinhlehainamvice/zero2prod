@@ -1,4 +1,5 @@
 use once_cell::sync::Lazy;
+use secrecy::ExposeSecret;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::net::TcpListener;
 use uuid::Uuid;
@@ -193,7 +194,7 @@ async fn get_test_database(database: &DatabaseSettings) -> PgPool {
         "{}://{}:{}@{}:{}/{}",
         database.protocol,
         database.username,
-        database.password,
+        database.password.expose_secret(),
         database.host,
         database.port,
         database_name
