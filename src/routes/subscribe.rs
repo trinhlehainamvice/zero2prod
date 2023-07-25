@@ -22,15 +22,17 @@ pub async fn subscribe(
     // Tracing span will scope code structure from enter to exit
     let request_span = tracing::info_span!(
         "Register a new subscriber.",
-        %req_id,
-        subscriber_name = %subscriber.name,
-        subscriber_email = %subscriber.email
+        request_id = %req_id,
+        name = %subscriber.name,
+        email = %subscriber.email
     );
     // Tracing span enter
     let _enter_span = request_span.enter();
 
     // Pass Span to Instrument
-    // Instrument handle to enter Span when Future is polled successfully
+    // Instrument handle to enter and exit Span when Future is polled
+    // enter Span when Future is polled at first time
+    // drop Span when Future is polled successfully
     let query_span = tracing::info_span!("Inserting a new subscriber to database",);
     match sqlx::query!(
         r#"
@@ -43,7 +45,7 @@ pub async fn subscribe(
         Utc::now() // need to use timestamptz instead of TIMESTAMP in sql database table
     )
     .execute(connection.as_ref())
-    // Attach span to instrument before await
+    // Attach span to instrument tell executor to poll this Future
     .instrument(query_span)
     .await
     {
