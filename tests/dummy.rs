@@ -181,8 +181,9 @@ async fn spawn_app() -> std::io::Result<TestApp> {
 async fn get_test_database(database: &DatabaseSettings) -> PgPool {
     let database_name = Uuid::new_v4().to_string();
 
+    let mut pg_options = database.get_pg_options();
     // Create test database
-    let mut connection = PgConnection::connect(&database.get_base_url())
+    let mut connection = PgConnection::connect_with(&pg_options)
         .await
         .expect("Failed to connect to Postgres");
     connection
@@ -190,18 +191,10 @@ async fn get_test_database(database: &DatabaseSettings) -> PgPool {
         .await
         .expect("Failed to create database");
 
-    let url = format!(
-        "{}://{}:{}@{}:{}/{}",
-        database.protocol,
-        database.username,
-        database.password.expose_secret(),
-        database.host,
-        database.port,
-        database_name
-    );
+    pg_options = pg_options.database(&database_name);
 
     // Migrate database
-    let connection_pool = PgPool::connect(&url)
+    let connection_pool = PgPool::connect_with(pg_options)
         .await
         .expect("Failed to connect to Postgres");
     sqlx::migrate!("./migrations")

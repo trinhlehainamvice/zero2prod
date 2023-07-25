@@ -3,9 +3,4 @@ application:
   default_log_level: info
   port: 8000
 database:
-  protocol: postgres
-  username: postgres
-  password: password
-  port: 5432
-  host: localhost
-  database_name: newsletter
+  engine: postgres

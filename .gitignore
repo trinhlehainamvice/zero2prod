@@ -16,6 +16,3 @@ Cargo.lock
 
 # Added by cargo
 /target
-
-.sqlx
-sqlx-data.json

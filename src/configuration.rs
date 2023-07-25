@@ -1,4 +1,6 @@
 use secrecy::{ExposeSecret, Secret};
+use serde_aux::prelude::deserialize_number_from_string;
+use sqlx::postgres::{PgConnectOptions, PgSslMode};
 
 #[derive(serde::Deserialize)]
 pub struct Settings {
@@ -11,17 +13,25 @@ impl Settings {
         let base_path = std::env::current_dir().expect("Failed to determine the current directory");
         let config_dir = base_path.join("configuration");
 
-        let env: Environment = std::env::var("APP_ENVIRONMENT")
+        let app_env_state: Environment = std::env::var("APP_ENV_STATE")
             .unwrap_or(Environment::Local.as_str().into())
             .try_into()
-            .expect("Failed to parse APP_ENVIRONMENT");
+            .expect("Failed to parse APP_ENV_STATE");
+
+        // TEMPLATE: APP_<Settings.data>__<data.var>
+        // e.g. APP_DATABASE__DATABASE_NAME
+        let config_env = config::Environment::default()
+            .prefix("app")
+            .prefix_separator("_")
+            .separator("__");
 
         // Read the configuration from the file
         // supported file extensions: json, toml, yaml, etc
         config::Config::builder()
             .add_source(config::File::from(config_dir.clone().join("share")))
             // ConfigBuilder will merge multiple sources to one when build
-            .add_source(config::File::from(config_dir.join(env.as_str())))
+            .add_source(config::File::from(config_dir.join(app_env_state.as_str())))
+            .add_source(config_env)
             .build()?
             // Deserialize the configuration into a Settings struct
             .try_deserialize()
@@ -33,6 +43,7 @@ pub struct ApplicationSettings {
     pub name: String,
     pub default_log_level: String,
     pub host: String,
+    #[serde(deserialize_with = "deserialize_number_from_string")]
     pub port: u16,
 }
 
@@ -44,36 +55,42 @@ impl ApplicationSettings {
 
 #[derive(serde::Deserialize)]
 pub struct DatabaseSettings {
-    pub protocol: String,
+    pub engine: String,
     pub username: String,
     pub password: Secret<String>,
+    #[serde(deserialize_with = "deserialize_number_from_string")]
     pub port: u16,
     pub host: String,
     pub database_name: String,
+    pub require_ssl: bool,
 }
 
 impl DatabaseSettings {
-    pub fn get_database_url(&self) -> String {
-        format!(
-            "{}://{}:{}@{}:{}/{}",
-            self.protocol,
-            self.username,
-            self.password.expose_secret(),
-            self.host,
-            self.port,
-            self.database_name
-        )
+    pub fn get_pg_database_options(&self) -> PgConnectOptions {
+        PgConnectOptions::new()
+            .host(&self.host)
+            .username(&self.username)
+            .password(self.password.expose_secret())
+            .database(&self.database_name)
+            .port(self.port)
+            .ssl_mode(self.get_ssl_mode())
     }
 
-    pub fn get_base_url(&self) -> String {
-        format!(
-            "{}://{}:{}@{}:{}",
-            self.protocol,
-            self.username,
-            self.password.expose_secret(),
-            self.host,
-            self.port
-        )
+    /// Without specify database
+    pub fn get_pg_options(&self) -> PgConnectOptions {
+        PgConnectOptions::new()
+            .host(&self.host)
+            .username(&self.username)
+            .password(self.password.expose_secret())
+            .port(self.port)
+            .ssl_mode(self.get_ssl_mode())
+    }
+
+    pub fn get_ssl_mode(&self) -> PgSslMode {
+        match self.require_ssl {
+            true => PgSslMode::Require,
+            _ => PgSslMode::Prefer,
+        }
     }
 }
 

@@ -39,6 +39,6 @@ RUN apt update -y \
 COPY --from=builder /app/target/release/zero2prod zero2prod
 # Configuration files are needed at runtime
 COPY configuration configuration
-ENV APP_ENVIRONMENT production
+ENV APP_ENV_STATE production
 ENTRYPOINT ["./zero2prod"]
 # endregion Runtime state

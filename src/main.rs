@@ -20,8 +20,7 @@ async fn main() -> std::io::Result<()> {
     let db_connection_pool = PgPoolOptions::new()
         // Limit connection timeout to avoid long wait times
         .acquire_timeout(std::time::Duration::from_secs(2))
-        .connect_lazy(&settings.database.get_database_url())
-        .expect("Failed to connect to Postgres");
+        .connect_lazy_with(settings.database.get_pg_database_options());
     let listener =
         TcpListener::bind(settings.application.get_url()).expect("Failed to bind address");
 
