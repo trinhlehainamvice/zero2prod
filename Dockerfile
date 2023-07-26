@@ -31,7 +31,6 @@ WORKDIR /app
 # Install ca-certificates - TLS certificates for HTTPS
 RUN apt update -y \
     && apt install -y --no-install-recommends openssl ca-certificates \
-    # Clean up
     && apt autoremove -y \
     && apt clean -y \
     && rm -rf /var/lib/apt/lists/*
