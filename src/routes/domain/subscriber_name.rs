@@ -44,7 +44,7 @@ impl TryInto<String> for SubscriberName {
 #[cfg(test)]
 mod tests {
     use crate::routes::SubscriberName;
-    use claim::{assert_err, assert_ok};
+    use claims::{assert_err, assert_ok};
 
     #[test]
     fn name_in_range_of_3_to_30_grapheme() {
