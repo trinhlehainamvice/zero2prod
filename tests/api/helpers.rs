@@ -2,7 +2,7 @@ use once_cell::sync::Lazy;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use uuid::Uuid;
 use zero2prod::configuration::{DatabaseSettings, Settings};
-use zero2prod::startup::build;
+use zero2prod::startup::Application;
 use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
 
 pub struct TestApp {
@@ -54,16 +54,16 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
     };
 
     let db_connection_pool = get_test_database(&settings.database).await;
-    let (app, port) = build(db_connection_pool.clone(), settings)
+    let app = Application::build(db_connection_pool.clone(), settings)
         .await
         .expect("Failed to build Server");
 
-    let addr = format!("http://127.0.0.1:{}", port);
+    let addr = format!("http://127.0.0.1:{}", app.port());
 
     // tokio spawn background thread an run app
     // We want to hold thread instance until tests finish (or end of tokio::test)
     // tokio::test manage background threads and terminate them when tests finish
-    tokio::spawn(app);
+    tokio::spawn(app.run_until_terminated());
 
     Ok(TestApp {
         addr,

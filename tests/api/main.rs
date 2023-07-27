@@ -1,3 +1,3 @@
-mod health_check;
+mod health;
 mod helpers;
 mod subscriptions;

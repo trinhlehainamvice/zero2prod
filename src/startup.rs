@@ -9,36 +9,47 @@ use sqlx::PgPool;
 use std::net::TcpListener;
 use tracing_actix_web::TracingLogger;
 
-pub async fn build(pg_pool: PgPool, settings: Settings) -> Result<(Server, u16), std::io::Error> {
-    let listener =
-        TcpListener::bind(settings.application.get_url()).expect("Failed to bind address");
-
-    let port = listener.local_addr().unwrap().port();
-
-    let email_client = get_email_client(settings.email_client);
-    // So to share data between threads, actix-web provide web::Data<T>(Arc<T>)
-    // which is a thread-safe reference counting pointer to a value of type T
-    let pg_pool = Data::new(pg_pool);
-    let email_client = Data::new(email_client);
-
-    // Actix-web runtime that have multiple threads
-    let server = HttpServer::new(move || {
-        App::new()
-            .wrap(TracingLogger::default()) // logger middleware
-            .route("/health", web::get().to(check_health))
-            .route("/subscriptions", web::post().to(subscribe))
-            // Application Context, that store state of application
-            .app_data(pg_pool.clone())
-            .app_data(email_client.clone())
-    })
-    .listen(listener)?
-    .run();
-
-    Ok((server, port))
+pub struct Application {
+    port: u16,
+    server: Server,
 }
 
-pub async fn run_until_terminated(server: Server) -> Result<(), std::io::Error> {
-    server.await
+impl Application {
+    pub async fn build(pg_pool: PgPool, settings: Settings) -> Result<Self, std::io::Error> {
+        let listener =
+            TcpListener::bind(settings.application.get_url()).expect("Failed to bind address");
+
+        let port = listener.local_addr().unwrap().port();
+
+        let email_client = get_email_client(settings.email_client);
+        // So to share data between threads, actix-web provide web::Data<T>(Arc<T>)
+        // which is a thread-safe reference counting pointer to a value of type T
+        let pg_pool = Data::new(pg_pool);
+        let email_client = Data::new(email_client);
+
+        // Actix-web runtime that have multiple threads
+        let server = HttpServer::new(move || {
+            App::new()
+                .wrap(TracingLogger::default()) // logger middleware
+                .route("/health", web::get().to(check_health))
+                .route("/subscriptions", web::post().to(subscribe))
+                // Application Context, that store state of application
+                .app_data(pg_pool.clone())
+                .app_data(email_client.clone())
+        })
+        .listen(listener)?
+        .run();
+
+        Ok(Self { server, port })
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    pub async fn run_until_terminated(self) -> Result<(), std::io::Error> {
+        self.server.await
+    }
 }
 
 // Use Pool to handle queue of connections rather than single connection like PgConnection
