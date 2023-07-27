@@ -1,6 +1,8 @@
 use sqlx::postgres::PgPoolOptions;
 use std::net::TcpListener;
 use zero2prod::configuration::Settings;
+use zero2prod::email_client::EmailClient;
+use zero2prod::routes::SubscriberEmail;
 use zero2prod::startup::run;
 use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
 
@@ -9,8 +11,8 @@ async fn main() -> std::io::Result<()> {
     let settings = Settings::get_configuration().expect("Failed to read configuration");
 
     init_tracing_subscriber(get_tracing_subscriber(
-        settings.application.name.clone(),
-        settings.application.default_log_level.clone(),
+        &settings.application.name,
+        &settings.application.default_log_level,
         std::io::stdout,
     ));
 
@@ -24,5 +26,12 @@ async fn main() -> std::io::Result<()> {
     let listener =
         TcpListener::bind(settings.application.get_url()).expect("Failed to bind address");
 
-    run(listener, db_connection_pool)?.await
+    let email_client = EmailClient::new(
+        settings.email_client.api_base_url,
+        SubscriberEmail::parse(settings.email_client.sender_email)
+            .expect("Failed to parse sender email"),
+        settings.email_client.auth_token
+    );
+
+    run(listener, db_connection_pool, email_client)?.await
 }

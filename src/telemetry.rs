@@ -7,8 +7,8 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{EnvFilter, Registry};
 
 pub fn get_tracing_subscriber<Sink>(
-    name: String,
-    default_log_level: String,
+    name: &str,
+    default_log_level: &str,
     sink: Sink,
 ) -> impl Subscriber + Send + Sync
 where
@@ -22,7 +22,7 @@ where
     let env_filter = EnvFilter::try_from_default_env().unwrap_or(EnvFilter::new(default_log_level));
 
     // Format Span with Bunyan format and output to stdout
-    let formatting_layer = BunyanFormattingLayer::new(name, sink);
+    let formatting_layer = BunyanFormattingLayer::new(name.into(), sink);
 
     // Setup Span with Layers
     // use with to chain Layers pipeline

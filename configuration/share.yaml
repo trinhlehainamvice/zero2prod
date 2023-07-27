@@ -4,3 +4,6 @@ application:
   port: 8000
 database:
   engine: postgres
+email_client:
+  api_base_url: https://api.postmarkapp.com
+  sender_email: 9YfJ5@example.com

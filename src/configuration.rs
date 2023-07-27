@@ -2,10 +2,13 @@ use secrecy::{ExposeSecret, Secret};
 use serde_aux::prelude::deserialize_number_from_string;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 
+const APP_ENV_STATE: &str = "APP_ENV_STATE";
+
 #[derive(serde::Deserialize)]
 pub struct Settings {
     pub application: ApplicationSettings,
     pub database: DatabaseSettings,
+    pub email_client: EmailClientSettings,
 }
 
 impl Settings {
@@ -13,10 +16,13 @@ impl Settings {
         let base_path = std::env::current_dir().expect("Failed to determine the current directory");
         let config_dir = base_path.join("configuration");
 
-        let app_env_state: Environment = std::env::var("APP_ENV_STATE")
+        let app_env_state: Environment = std::env::var(APP_ENV_STATE)
             .unwrap_or(Environment::Local.as_str().into())
             .try_into()
-            .expect("Failed to parse APP_ENV_STATE");
+            // .expect(&format!("Failed to parse {}", APP_ENV_STATE));
+            // `clippy` suggest to use `unwrap_or_else` instead of `expect` when use a function call
+            // function in `expect` is always called even `expect` itself is not called
+            .unwrap_or_else(|_| panic!("Failed to parse {}", APP_ENV_STATE));
 
         // TEMPLATE: APP_<Settings.data>__<data.var>
         // e.g. APP_DATABASE__DATABASE_NAME
@@ -51,6 +57,13 @@ impl ApplicationSettings {
     pub fn get_url(&self) -> String {
         format!("{}:{}", self.host, self.port)
     }
+}
+
+#[derive(serde::Deserialize)]
+pub struct EmailClientSettings {
+    pub api_base_url: String,
+    pub sender_email: String,
+    pub auth_token: Secret<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -114,7 +127,7 @@ impl TryFrom<String> for Environment {
         match s.as_str() {
             "local" => Ok(Self::Local),
             "production" => Ok(Self::Production),
-            other => Err(format!("Invalid APP_ENVIRONMENT: {}", other)),
+            other => Err(format!("Invalid {}: {}", APP_ENV_STATE, other)),
         }
     }
 }

@@ -3,6 +3,8 @@ use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::net::TcpListener;
 use uuid::Uuid;
 use zero2prod::configuration::{DatabaseSettings, Settings};
+use zero2prod::email_client::EmailClient;
+use zero2prod::routes::SubscriberEmail;
 use zero2prod::startup::run;
 use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
 
@@ -132,8 +134,8 @@ struct TestApp {
 }
 
 static TRACING: Lazy<()> = Lazy::new(|| {
-    let test_name = "test".to_string();
-    let default_log_level = "debug".to_string();
+    let test_name = "test";
+    let default_log_level = "debug";
     if std::env::var("TEST_LOG").is_ok() {
         init_tracing_subscriber(get_tracing_subscriber(
             test_name,
@@ -161,7 +163,14 @@ async fn spawn_app() -> std::io::Result<TestApp> {
 
     let config = Settings::get_configuration().expect("Failed to read configuration");
     let db_connection_pool = get_test_database(&config.database).await;
-    let app = run(listener, db_connection_pool.clone()).expect("Failed to bind address");
+    let email_client = EmailClient::new(
+        config.email_client.api_base_url,
+        SubscriberEmail::parse(config.email_client.sender_email)
+            .expect("Failed to parse sender email"),
+        config.email_client.auth_token
+    );
+    let app =
+        run(listener, db_connection_pool.clone(), email_client).expect("Failed to bind address");
 
     // tokio spawn background thread an run app
     // We want to hold thread instance until tests finish (or end of tokio::test)
