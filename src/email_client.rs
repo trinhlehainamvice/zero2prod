@@ -5,6 +5,7 @@ pub struct EmailClient {
     http_client: reqwest::Client,
     api_base_url: String,
     sender_email: SubscriberEmail,
+    auth_header: Secret<String>,
     auth_token: Secret<String>,
 }
 
@@ -12,12 +13,19 @@ impl EmailClient {
     pub fn new(
         api_base_url: String,
         sender_email: SubscriberEmail,
+        // TODO: API authentication not only depend on header
+        auth_header: Secret<String>,
         auth_token: Secret<String>,
+        request_timeout_millis: u64,
     ) -> Self {
         Self {
-            http_client: reqwest::Client::new(),
+            http_client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(request_timeout_millis))
+                .build()
+                .unwrap(),
             api_base_url,
             sender_email,
+            auth_header,
             auth_token,
         }
     }
@@ -42,9 +50,13 @@ impl EmailClient {
             html_body,
         };
 
+        // TODO: depend on how API server requires authentication to setup
         self.http_client
             .post(url.as_str())
-            .header("X-Postmark-Server-Token", self.auth_token.expose_secret())
+            .header(
+                self.auth_header.expose_secret(),
+                self.auth_token.expose_secret(),
+            )
             .json(&request_body)
             .send()
             .await?;
@@ -71,12 +83,13 @@ mod tests {
     use fake::faker::lorem::en::{Paragraph, Sentence};
     use fake::{Fake, Faker};
     use secrecy::Secret;
-    use wiremock::matchers::{header, header_exists, method, path};
+    use std::time::Duration;
+    use wiremock::matchers::{any, header, header_exists, method, path};
     use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
-    struct SendEmailRequestBodyMatcher;
+    struct SendPostmarkEmailRequestBodyMatcher;
 
-    impl wiremock::Match for SendEmailRequestBodyMatcher {
+    impl wiremock::Match for SendPostmarkEmailRequestBodyMatcher {
         fn matches(&self, request: &Request) -> bool {
             match serde_json::from_slice::<serde_json::Value>(&request.body) {
                 Ok(body) => {
@@ -91,34 +104,89 @@ mod tests {
         }
     }
 
+    fn subject() -> String {
+        Sentence(1..2).fake()
+    }
+
+    fn content() -> String {
+        Paragraph(1..10).fake()
+    }
+
+    fn subscriber_email() -> SubscriberEmail {
+        SubscriberEmail::parse(SafeEmail().fake()).unwrap()
+    }
+
+    fn sender_email() -> SubscriberEmail {
+        SubscriberEmail::parse(SafeEmail().fake()).unwrap()
+    }
+
+    fn auth_header() -> Secret<String> {
+        Secret::new("X-Postmark-Server-Token".to_string())
+    }
+
+    fn auth_token() -> Secret<String> {
+        Secret::new(Faker.fake())
+    }
+
+    fn timeout_millis() -> u64 {
+        100
+    }
+
     #[tokio::test]
-    async fn send_expected_email_client_request() {
+    async fn match_postmark_send_email_request() {
         // Arrange
         // Make a mock http server on random port on local machine
         let mock_server = MockServer::start().await;
-        let sender_email = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
-        let auth_token = Secret::new(Faker.fake());
         // Retrieve mock server url with `mock_server.uri()`
-        let email_client = EmailClient::new(mock_server.uri(), sender_email, auth_token);
+        let email_client = EmailClient::new(
+            mock_server.uri(),
+            sender_email(),
+            auth_header(),
+            auth_token(),
+            timeout_millis(),
+        );
 
         // Set up expected request requirements for the mock server inside `Mock::given`
         Mock::given(header_exists("X-Postmark-Server-Token"))
             .and(header("Content-Type", "application/json"))
             .and(path("/email"))
             .and(method("POST"))
-            .and(SendEmailRequestBodyMatcher)
+            .and(SendPostmarkEmailRequestBodyMatcher)
             .respond_with(ResponseTemplate::new(200))
             .expect(1)
             .mount(&mock_server)
             .await;
 
-        let subscriber_email = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
-        let subject: String = Sentence(1..2).fake();
-        let content: String = Paragraph(1..10).fake();
+        // Act
+        let _ = email_client
+            .send_email(&subscriber_email(), &subject(), &content(), &content())
+            .await;
+    }
+
+    #[tokio::test]
+    async fn send_expected_email_client_request_fail_return_400_timeout() {
+        // Arrange
+        // Make a mock http server on random port on local machine
+        let mock_server = MockServer::start().await;
+        // Retrieve mock server url with `mock_server.uri()`
+        let email_client = EmailClient::new(
+            mock_server.uri(),
+            sender_email(),
+            auth_header(),
+            auth_token(),
+            timeout_millis(),
+        );
+
+        // Set up expected request requirements for the mock server inside `Mock::given`
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(400).set_delay(Duration::from_millis(110)))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
 
         // Act
         let _ = email_client
-            .send_email(&subscriber_email, &subject, &content, &content)
+            .send_email(&subscriber_email(), &subject(), &content(), &content())
             .await;
     }
 }

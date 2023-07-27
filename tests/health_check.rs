@@ -167,7 +167,9 @@ async fn spawn_app() -> std::io::Result<TestApp> {
         config.email_client.api_base_url,
         SubscriberEmail::parse(config.email_client.sender_email)
             .expect("Failed to parse sender email"),
-        config.email_client.auth_token
+        config.email_client.auth_header,
+        config.email_client.auth_token,
+        config.email_client.request_timeout_millis,
     );
     let app =
         run(listener, db_connection_pool.clone(), email_client).expect("Failed to bind address");

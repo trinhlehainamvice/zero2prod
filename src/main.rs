@@ -30,7 +30,9 @@ async fn main() -> std::io::Result<()> {
         settings.email_client.api_base_url,
         SubscriberEmail::parse(settings.email_client.sender_email)
             .expect("Failed to parse sender email"),
-        settings.email_client.auth_token
+        settings.email_client.auth_header,
+        settings.email_client.auth_token,
+        settings.email_client.request_timeout_millis
     );
 
     run(listener, db_connection_pool, email_client)?.await

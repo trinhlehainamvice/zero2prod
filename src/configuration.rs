@@ -63,7 +63,9 @@ impl ApplicationSettings {
 pub struct EmailClientSettings {
     pub api_base_url: String,
     pub sender_email: String,
+    pub auth_header: Secret<String>,
     pub auth_token: Secret<String>,
+    pub request_timeout_millis: u64,
 }
 
 #[derive(serde::Deserialize)]
