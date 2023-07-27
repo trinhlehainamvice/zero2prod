@@ -35,14 +35,16 @@ mod tests {
     use crate::routes::SubscriberEmail;
     use fake::faker::internet::en::SafeEmail;
     use fake::Fake;
-    use quickcheck::Gen;
+    use rand::prelude::StdRng;
+    use rand::SeedableRng;
 
     #[derive(Debug, Clone)]
     struct ValidEmailFixture(pub String);
 
     impl quickcheck::Arbitrary for ValidEmailFixture {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            let email = SafeEmail().fake_with_rng(g);
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            let mut rng = StdRng::seed_from_u64(u64::arbitrary(g));
+            let email = SafeEmail().fake_with_rng(&mut rng);
             Self(email)
         }
     }
