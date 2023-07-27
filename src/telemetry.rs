@@ -1,3 +1,4 @@
+use crate::configuration::ApplicationSettings;
 use tracing::subscriber::set_global_default;
 use tracing::Subscriber;
 use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
@@ -37,4 +38,12 @@ pub fn init_tracing_subscriber(subscriber: impl Subscriber + Send + Sync) {
     // Redirect all log events that use 'log crate' to Subscriber
     LogTracer::init().expect("Failed to init LogTracer");
     set_global_default(subscriber).expect("Failed to set tracing subscriber");
+}
+
+pub fn config_tracing(app_config: &ApplicationSettings) {
+    init_tracing_subscriber(get_tracing_subscriber(
+        &app_config.name,
+        &app_config.default_log_level,
+        std::io::stdout,
+    ));
 }
