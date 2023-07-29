@@ -147,7 +147,7 @@ mod tests {
         );
 
         // Set up expected request requirements for the mock server inside `Mock::given`
-        Mock::given(header_exists("X-Postmark-Server-Token"))
+        Mock::given(header_exists("X-Mail-Server-Token"))
             .and(header("Content-Type", "application/json"))
             .and(path("/email"))
             .and(method("POST"))
