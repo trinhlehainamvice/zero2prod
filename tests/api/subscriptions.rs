@@ -1,9 +1,18 @@
 use crate::helpers::spawn_app;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, ResponseTemplate};
 
 #[tokio::test]
 async fn test_200_success_post_subscribe_in_urlencoded_format() {
     // Arrange
     let app = spawn_app().await.unwrap();
+
+    Mock::given(path("/email"))
+        .and(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&app.email_client)
+        .await;
 
     // Act
     let body = "name=Foo%20Bar&email=foobar%40example.com";

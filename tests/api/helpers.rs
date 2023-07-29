@@ -1,6 +1,7 @@
 use once_cell::sync::Lazy;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use uuid::Uuid;
+use wiremock::MockServer;
 use zero2prod::configuration::{DatabaseSettings, Settings};
 use zero2prod::startup::Application;
 use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
@@ -8,6 +9,7 @@ use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
 pub struct TestApp {
     pub addr: String,
     pub db_connection_pool: PgPool,
+    pub email_client: MockServer,
 }
 
 impl TestApp {
@@ -45,11 +47,15 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
     // once_cell make sure it is only run once on entire program lifetime
     Lazy::force(&TRACING);
 
+    let email_client = MockServer::start().await;
+
     let settings = {
         let mut settings = Settings::get_configuration().expect("Failed to read configuration");
 
         // Use port 0 to ask the OS to pick a random free port
         settings.application.port = 0;
+        // Use mock server to as email server for testing
+        settings.email_client.api_base_url = email_client.uri();
         settings
     };
 
@@ -68,6 +74,7 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
     Ok(TestApp {
         addr,
         db_connection_pool,
+        email_client,
     })
 }
 

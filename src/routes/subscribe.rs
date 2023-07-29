@@ -1,3 +1,4 @@
+use crate::email_client::EmailClient;
 use crate::routes::domain::{NewSubscriber, SubscriberEmail, SubscriberName};
 use actix_web::{web, HttpResponse, Responder};
 use chrono::Utc;
@@ -15,7 +16,7 @@ pub struct NewSubscriberForm {
 // Instrument can capture arguments of function, but CAN'T capture local variables
 #[tracing::instrument(
     name = "Add a new subscriber",
-    skip(subscriber, connection),
+    skip(subscriber, pg_pool, email_client),
     fields(
         name = %subscriber.name,
         email = %subscriber.email,
@@ -23,15 +24,29 @@ pub struct NewSubscriberForm {
 )]
 pub async fn subscribe(
     web::Form(subscriber): web::Form<NewSubscriberForm>,
-    connection: web::Data<PgPool>,
+    pg_pool: web::Data<PgPool>,
+    email_client: web::Data<EmailClient>,
 ) -> impl Responder {
-    let subscriber = match subscriber.try_into() {
+    let subscriber: NewSubscriber = match subscriber.try_into() {
         Ok(subscriber) => subscriber,
         // TODO: handle better error
         Err(_) => return HttpResponse::BadRequest().finish(),
     };
 
-    match insert_subscriber(&subscriber, &connection).await {
+    if email_client
+        .send_email(
+            &subscriber.email,
+            "Welcome!",
+            "Welcome to our newsletter",
+            "Welcome to our newsletter",
+        )
+        .await
+        .is_err()
+    {
+        return HttpResponse::InternalServerError().finish();
+    }
+
+    match insert_subscriber(&subscriber, &pg_pool).await {
         Ok(_) => HttpResponse::Ok().finish(),
         Err(_) => HttpResponse::InternalServerError().finish(),
     }
@@ -41,9 +56,9 @@ pub async fn subscribe(
 // This function not dependent on actix-web framework
 #[tracing::instrument(
     name = "Inserting a new subscriber to database"
-    skip(subscriber, connection)
+    skip(subscriber, pg_pool)
 )]
-async fn insert_subscriber(subscriber: &NewSubscriber, connection: &PgPool) -> sqlx::Result<()> {
+async fn insert_subscriber(subscriber: &NewSubscriber, pg_pool: &PgPool) -> sqlx::Result<()> {
     sqlx::query!(
         r#"
         INSERT INTO subscriptions (id, email, name, subscribed_at, status)
@@ -54,7 +69,7 @@ async fn insert_subscriber(subscriber: &NewSubscriber, connection: &PgPool) -> s
         subscriber.name.as_ref(),
         Utc::now()
     )
-    .execute(connection)
+    .execute(pg_pool)
     .await
     .map_err(|e| {
         tracing::error!("Failed to execute query: {:?}", e);
