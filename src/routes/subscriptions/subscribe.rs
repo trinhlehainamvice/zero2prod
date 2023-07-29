@@ -40,7 +40,7 @@ pub async fn subscribe(
         return HttpResponse::InternalServerError().finish();
     }
 
-    match insert_subscriber(&subscriber, &pg_pool).await {
+    match insert_pending_subscriber(&subscriber, &pg_pool).await {
         Ok(_) => HttpResponse::Ok().finish(),
         Err(_) => HttpResponse::InternalServerError().finish(),
     }
@@ -52,11 +52,14 @@ pub async fn subscribe(
     name = "Inserting a new subscriber to database"
     skip(subscriber, pg_pool)
 )]
-async fn insert_subscriber(subscriber: &NewSubscriber, pg_pool: &PgPool) -> sqlx::Result<()> {
+async fn insert_pending_subscriber(
+    subscriber: &NewSubscriber,
+    pg_pool: &PgPool,
+) -> sqlx::Result<()> {
     sqlx::query!(
         r#"
         INSERT INTO subscriptions (id, email, name, subscribed_at, status)
-        VALUES ($1, $2, $3, $4, 'confirmed')
+        VALUES ($1, $2, $3, $4, 'pending_confirmation')
         "#,
         Uuid::new_v4(),
         subscriber.email.as_ref(),
@@ -73,6 +76,10 @@ async fn insert_subscriber(subscriber: &NewSubscriber, pg_pool: &PgPool) -> sqlx
     Ok(())
 }
 
+#[tracing::instrument(
+    name = "Sending a confirmation email to a new subscriber",
+    skip(email_client, subscriber_email)
+)]
 async fn send_confirmation_email(
     email_client: web::Data<EmailClient>,
     subscriber_email: &SubscriberEmail,

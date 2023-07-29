@@ -3,7 +3,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, ResponseTemplate};
 
 #[tokio::test]
-async fn test_200_success_post_subscribe_in_urlencoded_format() {
+async fn post_subscribe_in_urlencoded_valid_format_ret_200() {
     // Arrange
     let app = spawn_app().await.unwrap();
 
@@ -60,10 +60,17 @@ async fn test_200_success_connect_to_database_and_subscribe_valid_data_in_urlenc
 }
 
 #[tokio::test]
-async fn query_subscribed_user_email_from_database_ret_200() {
+async fn query_pending_confirmation_subscriber_after_user_send_subscription_form_ret_200() {
     // Arrange
     let app = spawn_app().await.unwrap();
     let body = "name=Foo%20Bar&email=foobar%40example.com";
+
+    Mock::given(path("/email"))
+        .and(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&app.email_client)
+        .await;
 
     // Act
     let response = app.post_subscriptions(body.into()).await;
@@ -72,7 +79,7 @@ async fn query_subscribed_user_email_from_database_ret_200() {
     assert!(response.status().is_success());
 
     // Act
-    let subscriber = sqlx::query!("SELECT email, name FROM subscriptions")
+    let subscriber = sqlx::query!("SELECT email, name, status FROM subscriptions")
         .fetch_one(&app.db_connection_pool)
         .await
         .expect("Failed to fetch saved subscriptions");
@@ -80,6 +87,7 @@ async fn query_subscribed_user_email_from_database_ret_200() {
     // Assert
     assert_eq!("foobar@example.com", subscriber.email);
     assert_eq!("Foo Bar", subscriber.name);
+    assert_eq!("pending_confirmation", subscriber.status);
 }
 
 #[tokio::test]
@@ -114,6 +122,18 @@ async fn send_confirmation_to_subscriber_email_with_link_return_200() {
 
     // Confirmation link in HTML body and plain text body need to be the same
     assert_eq!(html_link, text_link);
+
+    // Assert
+    assert!(response.status().is_success());
+}
+
+#[tokio::test]
+async fn get_confirm_without_check_token_ret_200() {
+    // Arrange
+    let app = spawn_app().await.unwrap();
+
+    // Act
+    let response = app.get_confirmation("abc").await;
 
     // Assert
     assert!(response.status().is_success());

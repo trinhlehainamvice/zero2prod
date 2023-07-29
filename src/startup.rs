@@ -1,6 +1,6 @@
 use crate::configuration::{DatabaseSettings, EmailClientSettings, Settings};
 use crate::email_client::EmailClient;
-use crate::routes::{check_health, subscribe, SubscriberEmail};
+use crate::routes::{check_health, subscriptions, SubscriberEmail};
 use actix_web::dev::Server;
 use actix_web::web::Data;
 use actix_web::{web, App, HttpServer};
@@ -32,7 +32,11 @@ impl Application {
             App::new()
                 .wrap(TracingLogger::default()) // logger middleware
                 .route("/health", web::get().to(check_health))
-                .route("/subscriptions", web::post().to(subscribe))
+                .route("/subscriptions", web::post().to(subscriptions::subscribe))
+                .route(
+                    "/subscriptions/confirm",
+                    web::get().to(subscriptions::confirm),
+                )
                 // Application Context, that store state of application
                 .app_data(pg_pool.clone())
                 .app_data(email_client.clone())
