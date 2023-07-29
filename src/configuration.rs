@@ -3,6 +3,8 @@ use serde_aux::prelude::deserialize_number_from_string;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 
 const APP_ENV_STATE: &str = "APP_ENV_STATE";
+const LOCAL: &str = "local";
+const PRODUCTION: &str = "production";
 
 #[derive(serde::Deserialize)]
 pub struct Settings {
@@ -17,7 +19,7 @@ impl Settings {
         let config_dir = base_path.join("configuration");
 
         let app_env_state: Environment = std::env::var(APP_ENV_STATE)
-            .unwrap_or(Environment::Local.as_str().into())
+            .unwrap_or(LOCAL.to_string())
             .try_into()
             // .expect(&format!("Failed to parse {}", APP_ENV_STATE));
             // `clippy` suggest to use `unwrap_or_else` instead of `expect` when use a function call
@@ -115,10 +117,10 @@ enum Environment {
 }
 
 impl Environment {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
-            Environment::Local => "local",
-            Environment::Production => "production",
+            Environment::Local => LOCAL,
+            Environment::Production => PRODUCTION,
         }
     }
 }
@@ -127,8 +129,8 @@ impl TryFrom<String> for Environment {
     type Error = String;
     fn try_from(s: String) -> Result<Self, Self::Error> {
         match s.as_str() {
-            "local" => Ok(Self::Local),
-            "production" => Ok(Self::Production),
+            LOCAL => Ok(Self::Local),
+            PRODUCTION => Ok(Self::Production),
             other => Err(format!("Invalid {}: {}", APP_ENV_STATE, other)),
         }
     }

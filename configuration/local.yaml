@@ -10,5 +10,5 @@ database:
 email_client:
   api_base_url: http://127.0.0.1:1080
   sender_email: 9YfJ5@example.com
-  auth_header: X-Postmark-Server-Token
+  auth_header: X-Mail-Server-Token
   auth_token: secret_token

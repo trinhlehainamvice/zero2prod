@@ -121,7 +121,7 @@ mod tests {
     }
 
     fn auth_header() -> Secret<String> {
-        Secret::new("X-Postmark-Server-Token".to_string())
+        Secret::new("X-Mail-Server-Token".to_string())
     }
 
     fn auth_token() -> Secret<String> {
