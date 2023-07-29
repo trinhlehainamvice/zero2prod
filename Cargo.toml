@@ -51,3 +51,4 @@ quickcheck_macros = "1"
 wiremock = "0.5"
 tokio = { version = "1", features = ["rt"] }
 serde_json = "1"
+linkify = "0.10"

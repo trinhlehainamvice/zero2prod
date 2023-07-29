@@ -33,13 +33,7 @@ pub async fn subscribe(
         Err(_) => return HttpResponse::BadRequest().finish(),
     };
 
-    if email_client
-        .send_email(
-            &subscriber.email,
-            "Welcome!",
-            "Welcome to our newsletter",
-            "Welcome to our newsletter",
-        )
+    if send_confirmation_email(email_client, &subscriber.email)
         .await
         .is_err()
     {
@@ -77,6 +71,27 @@ async fn insert_subscriber(subscriber: &NewSubscriber, pg_pool: &PgPool) -> sqlx
     })?;
 
     Ok(())
+}
+
+async fn send_confirmation_email(
+    email_client: web::Data<EmailClient>,
+    subscriber_email: &SubscriberEmail,
+) -> Result<(), reqwest::Error> {
+    let confirmation_link = "http://localhost:3000/subscribe/confirm?email=";
+    let subject = "Confirmation";
+    let html_body = format!(
+        "Welcome to our newsletter!<br />\
+        Click <a href=\"{}\">here</a> to confirm your subscription.",
+        confirmation_link,
+    );
+    let text_body = format!(
+        "Welcome to our newsletter!\nGo to this link: {} to confirm your subscription.",
+        confirmation_link
+    );
+
+    email_client
+        .send_email(subscriber_email, subject, &text_body, &html_body)
+        .await
 }
 
 impl TryInto<NewSubscriber> for NewSubscriberForm {

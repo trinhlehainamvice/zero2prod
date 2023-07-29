@@ -60,7 +60,7 @@ async fn test_200_success_connect_to_database_and_subscribe_valid_data_in_urlenc
 }
 
 #[tokio::test]
-async fn test_query_subscriptions_name_from_database() {
+async fn query_subscribed_user_email_from_database_ret_200() {
     // Arrange
     let app = spawn_app().await.unwrap();
     let body = "name=Foo%20Bar&email=foobar%40example.com";
@@ -80,4 +80,41 @@ async fn test_query_subscriptions_name_from_database() {
     // Assert
     assert_eq!("foobar@example.com", subscriber.email);
     assert_eq!("Foo Bar", subscriber.name);
+}
+
+#[tokio::test]
+async fn send_confirmation_to_subscriber_email_with_link_return_200() {
+    // Arrange
+    let app = spawn_app().await.unwrap();
+
+    Mock::given(path("/email"))
+        .and(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&app.email_client)
+        .await;
+
+    // Act
+    let body = "name=Foo%20Bar&email=foobar%40example.com";
+    let response = app.post_subscriptions(body.into()).await;
+
+    let get_link = |s: &str| {
+        let links: Vec<_> = linkify::LinkFinder::new()
+            .links(s)
+            .filter(|l| *l.kind() == linkify::LinkKind::Url)
+            .collect();
+        assert_eq!(links.len(), 1);
+        links[0].as_str().to_owned()
+    };
+
+    let email_request = &app.email_client.received_requests().await.unwrap()[0];
+    let body: serde_json::Value = serde_json::from_slice(&email_request.body).unwrap();
+    let html_link = get_link(body["HtmlBody"].as_str().unwrap());
+    let text_link = get_link(body["TextBody"].as_str().unwrap());
+
+    // Confirmation link in HTML body and plain text body need to be the same
+    assert_eq!(html_link, text_link);
+
+    // Assert
+    assert!(response.status().is_success());
 }
