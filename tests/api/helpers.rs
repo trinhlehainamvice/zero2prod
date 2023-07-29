@@ -8,6 +8,7 @@ use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
 
 pub struct TestApp {
     pub addr: String,
+    pub port: u16,
     pub db_connection_pool: PgPool,
     pub email_client: MockServer,
 }
@@ -73,7 +74,8 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
         .await
         .expect("Failed to build Server");
 
-    let addr = format!("http://127.0.0.1:{}", app.port());
+    let port = app.port();
+    let addr = format!("http://127.0.0.1:{}", port);
 
     // tokio spawn background thread an run app
     // We want to hold thread instance until tests finish (or end of tokio::test)
@@ -82,9 +84,20 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
 
     Ok(TestApp {
         addr,
+        port,
         db_connection_pool,
         email_client,
     })
+}
+
+pub fn get_confirmation_link(req: &wiremock::Request, body_key: &str) -> String {
+    let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+    let links: Vec<_> = linkify::LinkFinder::new()
+        .links(body[body_key].as_str().unwrap())
+        .filter(|l| *l.kind() == linkify::LinkKind::Url)
+        .collect();
+    assert_eq!(links.len(), 1);
+    links[0].as_str().to_owned()
 }
 
 // Test will cause unexpected result if do same test multiple times to the same database

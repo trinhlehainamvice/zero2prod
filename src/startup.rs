@@ -26,6 +26,7 @@ impl Application {
         // which is a thread-safe reference counting pointer to a value of type T
         let pg_pool = Data::new(pg_pool);
         let email_client = Data::new(email_client);
+        let app_base_url = Data::new(settings.application.base_url);
 
         // Actix-web runtime that have multiple threads
         let server = HttpServer::new(move || {
@@ -40,6 +41,7 @@ impl Application {
                 // Application Context, that store state of application
                 .app_data(pg_pool.clone())
                 .app_data(email_client.clone())
+                .app_data(app_base_url.clone())
         })
         .listen(listener)?
         .run();

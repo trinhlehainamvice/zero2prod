@@ -16,7 +16,7 @@ pub struct NewSubscriberForm {
 // Instrument can capture arguments of function, but CAN'T capture local variables
 #[tracing::instrument(
     name = "Add a new subscriber",
-    skip(subscriber, pg_pool, email_client),
+    skip(subscriber, pg_pool, email_client, app_base_url),
     fields(
         name = %subscriber.name,
         email = %subscriber.email,
@@ -26,6 +26,7 @@ pub async fn subscribe(
     web::Form(subscriber): web::Form<NewSubscriberForm>,
     pg_pool: web::Data<PgPool>,
     email_client: web::Data<EmailClient>,
+    app_base_url: web::Data<String>,
 ) -> impl Responder {
     let subscriber: NewSubscriber = match subscriber.try_into() {
         Ok(subscriber) => subscriber,
@@ -33,7 +34,7 @@ pub async fn subscribe(
         Err(_) => return HttpResponse::BadRequest().finish(),
     };
 
-    if send_confirmation_email(email_client, &subscriber.email)
+    if send_confirmation_email(&app_base_url, email_client, &subscriber.email)
         .await
         .is_err()
     {
@@ -78,13 +79,16 @@ async fn insert_pending_subscriber(
 
 #[tracing::instrument(
     name = "Sending a confirmation email to a new subscriber",
-    skip(email_client, subscriber_email)
+    skip(app_base_url, email_client, subscriber_email)
 )]
 async fn send_confirmation_email(
+    app_base_url: &str,
     email_client: web::Data<EmailClient>,
     subscriber_email: &SubscriberEmail,
 ) -> Result<(), reqwest::Error> {
-    let confirmation_link = "http://localhost:3000/subscribe/confirm?email=";
+    // TODO: handle generate token later
+    let confirmation_link = format!("{}/subscriptions/confirm?token={}", app_base_url, "abc");
+    // TODO: make better form
     let subject = "Confirmation";
     let html_body = format!(
         "Welcome to our newsletter!<br />\
