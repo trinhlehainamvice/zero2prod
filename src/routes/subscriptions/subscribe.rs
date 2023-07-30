@@ -1,6 +1,7 @@
 use crate::email_client::EmailClient;
 use crate::routes::domain::{NewSubscriber, SubscriberEmail, SubscriberName};
 use actix_web::{web, HttpResponse, ResponseError};
+use anyhow::Context;
 use chrono::Utc;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -29,8 +30,8 @@ impl TryInto<NewSubscriber> for NewSubscriberForm {
 pub enum SubscribeError {
     #[error("{0}")]
     InvalidSubscriptionForm(String),
-    #[error("{1}")]
-    UnexpectedError(#[source] Box<dyn std::error::Error>, String),
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
 }
 
 impl ResponseError for SubscribeError {
@@ -64,9 +65,10 @@ pub async fn subscribe(
     email_client: web::Data<EmailClient>,
     app_base_url: web::Data<String>,
 ) -> Result<HttpResponse, SubscribeError> {
-    let mut transaction = pg_pool.begin().await.map_err(|e| {
-        SubscribeError::UnexpectedError(Box::new(e), "Failed to begin database transaction".into())
-    })?;
+    let mut transaction = pg_pool
+        .begin()
+        .await
+        .context("Failed to begin a database transaction")?;
 
     let subscriber: NewSubscriber = subscriber
         .try_into()
@@ -74,26 +76,20 @@ pub async fn subscribe(
 
     let subscription_id = insert_pending_subscriber(&subscriber, &mut transaction)
         .await
-        .map_err(|e| {
-            SubscribeError::UnexpectedError(Box::new(e), "Failed to insert new subscriber".into())
-        })?;
+        .context("Failed to insert new subscriber")?;
 
     let subscription_token = generate_subscription_token();
     insert_subscription_token(&subscription_id, &subscription_token, &mut transaction)
         .await
-        .map_err(|e| {
-            SubscribeError::UnexpectedError(
-                Box::new(e),
-                "Failed to insert subscription token".into(),
-            )
-        })?;
+        .context("Failed to insert subscription token into database")?;
 
     // Use Transaction to guarantee all database queries in one request is failed or success all together
     // To avoid fault states in database
     // Usually use when there are multiple `INSERT` or `UPDATE` queries
-    transaction.commit().await.map_err(|e| {
-        SubscribeError::UnexpectedError(Box::new(e), "Failed to commit database transaction".into())
-    })?;
+    transaction
+        .commit()
+        .await
+        .context("Failed to commit a database transaction")?;
 
     // Need to insert subscription token into database before sending confirmation email
     send_confirmation_email(
@@ -103,9 +99,7 @@ pub async fn subscribe(
         &subscription_token,
     )
     .await
-    .map_err(|e| {
-        SubscribeError::UnexpectedError(Box::new(e), "Failed to send confirmation email".into())
-    })?;
+    .context("Failed to send confirmation email")?;
 
     Ok(HttpResponse::Ok().finish())
 }
