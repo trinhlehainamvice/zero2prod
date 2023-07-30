@@ -9,7 +9,7 @@ use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
 pub struct TestApp {
     pub addr: String,
     pub port: u16,
-    pub db_connection_pool: PgPool,
+    pub pg_pool: PgPool,
     pub email_client: MockServer,
 }
 
@@ -26,7 +26,7 @@ impl TestApp {
 }
 
 static TRACING: Lazy<()> = Lazy::new(|| {
-    let test_name = "test";
+    let test_name = "test_app";
     let default_log_level = "debug";
     if std::env::var("TEST_LOG").is_ok() {
         init_tracing_subscriber(get_tracing_subscriber(
@@ -76,7 +76,7 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
     Ok(TestApp {
         addr,
         port,
-        db_connection_pool,
+        pg_pool: db_connection_pool,
         email_client,
     })
 }

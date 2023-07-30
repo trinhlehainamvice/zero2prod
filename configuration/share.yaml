@@ -1,6 +1,6 @@
 application:
   name: zero2prod
-  default_log_level: info
+  rust_log: sqlx=error,info
   port: 8000
 database:
   engine: postgres

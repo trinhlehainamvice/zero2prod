@@ -49,7 +49,7 @@ impl Settings {
 #[derive(serde::Deserialize)]
 pub struct ApplicationSettings {
     pub name: String,
-    pub default_log_level: String,
+    pub rust_log: String,
     pub host: String,
     pub base_url: String,
     #[serde(deserialize_with = "deserialize_number_from_string")]

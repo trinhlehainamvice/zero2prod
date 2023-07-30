@@ -80,7 +80,7 @@ async fn query_pending_confirmation_subscriber_after_user_send_subscription_form
 
     // Act
     let subscriber = sqlx::query!("SELECT email, name, status FROM subscriptions")
-        .fetch_one(&app.db_connection_pool)
+        .fetch_one(&app.pg_pool)
         .await
         .expect("Failed to fetch saved subscriptions");
 
@@ -138,7 +138,7 @@ async fn click_confirmation_link_in_email_and_query_subscriber_status_as_confirm
 
     // Assert
     let saved = sqlx::query!("SELECT email, name, status FROM subscriptions")
-        .fetch_one(&app.db_connection_pool)
+        .fetch_one(&app.pg_pool)
         .await
         .expect("Failed to fetch saved subscriptions");
 
@@ -161,11 +161,34 @@ async fn click_confirmation_link_in_email_and_query_subscriber_status_as_confirm
 
     // Assert
     let saved = sqlx::query!("SELECT email, name, status FROM subscriptions")
-        .fetch_one(&app.db_connection_pool)
+        .fetch_one(&app.pg_pool)
         .await
         .expect("Failed to fetch saved subscriptions");
 
     assert_eq!("foobar@example.com", saved.email);
     assert_eq!("Foo Bar", saved.name);
     assert_eq!("confirmed", saved.status);
+}
+
+#[tokio::test]
+async fn internal_query_error_ret_500() {
+    // Arrange
+    let app = spawn_app().await.unwrap();
+    let body = "name=Foo%20Bar&email=foobar%40example.com";
+
+    sqlx::query!(
+        r#"
+        ALTER TABLE subscription_tokens
+        DROP COLUMN subscription_token;
+        "#,
+    )
+    .execute(&app.pg_pool)
+    .await
+    .unwrap();
+
+    // Act
+    let response = app.post_subscriptions(body.into()).await;
+
+    // Assert
+    assert_eq!(500, response.status().as_u16());
 }

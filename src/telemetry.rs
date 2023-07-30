@@ -43,7 +43,7 @@ pub fn init_tracing_subscriber(subscriber: impl Subscriber + Send + Sync) {
 pub fn config_tracing(app_config: &ApplicationSettings) {
     init_tracing_subscriber(get_tracing_subscriber(
         &app_config.name,
-        &app_config.default_log_level,
+        &app_config.rust_log,
         std::io::stdout,
     ));
 }
