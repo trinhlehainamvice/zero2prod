@@ -1,6 +1,6 @@
 use crate::configuration::{DatabaseSettings, EmailClientSettings, Settings};
 use crate::email_client::EmailClient;
-use crate::routes::{check_health, subscriptions, SubscriberEmail};
+use crate::routes::{check_health, publish_newsletter, subscriptions, SubscriberEmail};
 use actix_web::dev::Server;
 use actix_web::web::Data;
 use actix_web::{web, App, HttpServer};
@@ -38,6 +38,7 @@ impl Application {
                     "/subscriptions/confirm",
                     web::get().to(subscriptions::confirm),
                 )
+                .route("/newsletters", web::post().to(publish_newsletter))
                 // Application Context, that store state of application
                 .app_data(pg_pool.clone())
                 .app_data(email_client.clone())

@@ -1,7 +1,8 @@
 use once_cell::sync::Lazy;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use uuid::Uuid;
-use wiremock::MockServer;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 use zero2prod::configuration::{DatabaseSettings, Settings};
 use zero2prod::startup::Application;
 use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
@@ -22,6 +23,47 @@ impl TestApp {
             .send()
             .await
             .expect("Failed to execute request")
+    }
+
+    pub async fn post_newsletters(&self, body: serde_json::Value) -> reqwest::Response {
+        reqwest::Client::new()
+            .post(&format!("{}/newsletters", self.addr))
+            .json(&body)
+            .send()
+            .await
+            .expect("Failed to execute request")
+    }
+
+    pub async fn create_unconfirmed_subscriber(&self, body: &str) -> ConfirmationLinks {
+        // Arrange
+        let _scoped_mock = Mock::given(path("/email"))
+            .and(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount_as_scoped(&self.email_client)
+            .await;
+
+        // Act
+        self.post_subscriptions(body.into()).await;
+        let email_request = &self.email_client.received_requests().await.unwrap()[0];
+
+        ConfirmationLinks::get_confirmation_link(email_request)
+
+        // Assert when scoped_mock drop
+    }
+
+    pub async fn create_confirmed_subscriber(&self, body: &str) {
+        // Arrange
+        let confirmation_links = self.create_unconfirmed_subscriber(body).await;
+        let mut link = reqwest::Url::parse(&confirmation_links.html).unwrap();
+        link.set_port(Some(self.port)).unwrap();
+
+        // Act
+        reqwest::get(link)
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
     }
 }
 

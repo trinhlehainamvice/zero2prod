@@ -9,6 +9,7 @@ use serde::Deserialize;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::fmt::{Debug, Display, Formatter};
 use uuid::Uuid;
+use crate::routes::error_chain_fmt;
 
 #[derive(Deserialize)]
 pub struct NewSubscriberForm {
@@ -38,7 +39,9 @@ impl ResponseError for SubscribeError {
     fn status_code(&self) -> actix_web::http::StatusCode {
         match self {
             SubscribeError::InvalidSubscriptionForm(_) => actix_web::http::StatusCode::BAD_REQUEST,
-            _ => actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+            SubscribeError::UnexpectedError(_) => {
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+            }
         }
     }
 }
@@ -135,16 +138,6 @@ pub struct InsertSubscriptionError(sqlx::Error);
 
 impl ResponseError for InsertSubscriptionError {}
 
-fn error_chain_fmt(e: &impl std::error::Error, f: &mut Formatter<'_>) -> std::fmt::Result {
-    writeln!(f, "{}\n", e)?;
-    // Retrieve all underlying layers errors
-    let mut current = e.source();
-    while let Some(cause) = current {
-        writeln!(f, "Caused by:\n\t{}", cause)?;
-        current = cause.source();
-    }
-    Ok(())
-}
 
 impl std::error::Error for InsertSubscriptionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
