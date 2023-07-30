@@ -90,14 +90,27 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
     })
 }
 
-pub fn get_confirmation_link(req: &wiremock::Request, body_key: &str) -> String {
-    let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+pub struct ConfirmationLinks {
+    pub html: String,
+    pub plain_text: String,
+}
+
+fn get_link(s: &str) -> String {
     let links: Vec<_> = linkify::LinkFinder::new()
-        .links(body[body_key].as_str().unwrap())
+        .links(s)
         .filter(|l| *l.kind() == linkify::LinkKind::Url)
         .collect();
     assert_eq!(links.len(), 1);
     links[0].as_str().to_owned()
+}
+
+impl ConfirmationLinks {
+    pub fn get_confirmation_link(req: &wiremock::Request) -> Self {
+        let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+        let html = get_link(body["HtmlBody"].as_str().unwrap());
+        let plain_text = get_link(body["TextBody"].as_str().unwrap());
+        Self { html, plain_text }
+    }
 }
 
 // Test will cause unexpected result if do same test multiple times to the same database

@@ -64,6 +64,7 @@ impl Application {
 pub fn get_pg_pool(database_config: &DatabaseSettings) -> PgPool {
     PgPoolOptions::new()
         // Limit connection timeout to avoid long wait times
+        // TODO: set query timeout from configuration file
         .acquire_timeout(std::time::Duration::from_secs(2))
         .connect_lazy_with(database_config.get_pg_database_options())
 }

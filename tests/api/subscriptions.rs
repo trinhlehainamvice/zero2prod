@@ -1,4 +1,4 @@
-use crate::helpers::{get_confirmation_link, spawn_app};
+use crate::helpers::{spawn_app, ConfirmationLinks};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, ResponseTemplate};
 
@@ -107,8 +107,9 @@ async fn send_confirmation_to_subscriber_email_with_link_return_200() {
     let response = app.post_subscriptions(body.into()).await;
 
     let email_request = &app.email_client.received_requests().await.unwrap()[0];
-    let html_link = get_confirmation_link(email_request, "HtmlBody");
-    let text_link = get_confirmation_link(email_request, "TextBody");
+    let confirmation_links = ConfirmationLinks::get_confirmation_link(&email_request);
+    let html_link = confirmation_links.html;
+    let text_link = confirmation_links.plain_text;
 
     // Confirmation link in HTML body and plain text body need to be the same
     assert_eq!(html_link, text_link);
@@ -130,12 +131,13 @@ async fn get_confirm_without_check_token_ret_200() {
 }
 
 #[tokio::test]
-async fn post_subscriber_and_get_confirm_with_check_token_as_app_base_url_ret_200() {
+async fn post_subscriber_and_get_confirm_with_check_token_as_app_base_url_ret_500() {
     // Arrange
     let app = spawn_app().await.unwrap();
     Mock::given(path("/email"))
         .and(method("POST"))
         .respond_with(ResponseTemplate::new(200))
+        .expect(1)
         .mount(&app.email_client)
         .await;
     let body = "name=Foo%20Bar&email=foobar%40example.com";
@@ -148,8 +150,8 @@ async fn post_subscriber_and_get_confirm_with_check_token_as_app_base_url_ret_20
 
     // Act
     let email_request = &app.email_client.received_requests().await.unwrap()[0];
-    let raw_confirmation_link = get_confirmation_link(email_request, "HtmlBody");
-    let mut confirmation_link = reqwest::Url::parse(&raw_confirmation_link).unwrap();
+    let confirmation_links = ConfirmationLinks::get_confirmation_link(email_request);
+    let mut confirmation_link = reqwest::Url::parse(&confirmation_links.html).unwrap();
 
     // NOTE: If app_base_url is a localhost, we need to add the port to access the confirmation link locally
     confirmation_link.set_port(Some(app.port)).unwrap();
@@ -161,5 +163,57 @@ async fn post_subscriber_and_get_confirm_with_check_token_as_app_base_url_ret_20
     let response = reqwest::get(confirmation_link).await.unwrap();
 
     // Assert
+    assert!(response.status().is_server_error());
+}
+
+#[tokio::test]
+async fn click_confirmation_link_in_email_and_query_subscriber_status_as_confirmed_ret_200() {
+    // Arrange
+    let app = spawn_app().await.unwrap();
+    Mock::given(path("/email"))
+        .and(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&app.email_client)
+        .await;
+    let body = "name=Foo%20Bar&email=foobar%40example.com";
+
+    // Act
+    let response = app.post_subscriptions(body.into()).await;
+
+    // Assert
     assert!(response.status().is_success());
+
+    // Assert
+    let saved = sqlx::query!("SELECT email, name, status FROM subscriptions")
+        .fetch_one(&app.db_connection_pool)
+        .await
+        .expect("Failed to fetch saved subscriptions");
+
+    assert_eq!("foobar@example.com", saved.email);
+    assert_eq!("Foo Bar", saved.name);
+    assert_eq!("pending_confirmation", saved.status);
+
+    // Arrange
+    let email_request = &app.email_client.received_requests().await.unwrap()[0];
+    let confirmation_links = ConfirmationLinks::get_confirmation_link(email_request);
+    let mut confirmation_link = reqwest::Url::parse(&confirmation_links.html).unwrap();
+    confirmation_link.set_port(Some(app.port)).unwrap();
+
+    // Act
+    reqwest::get(confirmation_link)
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    // Assert
+    let saved = sqlx::query!("SELECT email, name, status FROM subscriptions")
+        .fetch_one(&app.db_connection_pool)
+        .await
+        .expect("Failed to fetch saved subscriptions");
+
+    assert_eq!("foobar@example.com", saved.email);
+    assert_eq!("Foo Bar", saved.name);
+    assert_eq!("confirmed", saved.status);
 }

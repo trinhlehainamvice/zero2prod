@@ -2,6 +2,8 @@ use crate::email_client::EmailClient;
 use crate::routes::domain::{NewSubscriber, SubscriberEmail, SubscriberName};
 use actix_web::{web, HttpResponse, Responder};
 use chrono::Utc;
+use rand::distributions::Alphanumeric;
+use rand::Rng;
 use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -34,14 +36,28 @@ pub async fn subscribe(
         Err(_) => return HttpResponse::BadRequest().finish(),
     };
 
-    if send_confirmation_email(&app_base_url, email_client, &subscriber.email)
+    let subscription_id = match insert_pending_subscriber(&subscriber, &pg_pool).await {
+        Ok(id) => id,
+        Err(_) => return HttpResponse::InternalServerError().finish(),
+    };
+
+    let subscription_token = generate_subscription_token();
+    if insert_subscription_token(&subscription_id, &subscription_token, &pg_pool)
         .await
         .is_err()
     {
         return HttpResponse::InternalServerError().finish();
     }
 
-    match insert_pending_subscriber(&subscriber, &pg_pool).await {
+    // Need to insert subscription token into database before sending confirmation email
+    match send_confirmation_email(
+        &app_base_url,
+        email_client,
+        &subscriber.email,
+        &subscription_token,
+    )
+    .await
+    {
         Ok(_) => HttpResponse::Ok().finish(),
         Err(_) => HttpResponse::InternalServerError().finish(),
     }
@@ -50,22 +66,50 @@ pub async fn subscribe(
 // Separate sql query into separate function (separation of concerns)
 // This function not dependent on actix-web framework
 #[tracing::instrument(
-    name = "Inserting a new subscriber to database"
+    name = "Insert a new subscriber to database with pending status",
     skip(subscriber, pg_pool)
 )]
 async fn insert_pending_subscriber(
     subscriber: &NewSubscriber,
     pg_pool: &PgPool,
-) -> sqlx::Result<()> {
+) -> sqlx::Result<Uuid> {
+    let id = Uuid::new_v4();
     sqlx::query!(
         r#"
         INSERT INTO subscriptions (id, email, name, subscribed_at, status)
         VALUES ($1, $2, $3, $4, 'pending_confirmation')
         "#,
-        Uuid::new_v4(),
+        id,
         subscriber.email.as_ref(),
         subscriber.name.as_ref(),
         Utc::now()
+    )
+    .execute(pg_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to execute query: {:?}", e);
+        e
+    })?;
+
+    Ok(id)
+}
+
+#[tracing::instrument(
+    name = "Insert new subscription token map to a subscription id into database",
+    skip(subscription_id, subscription_token, pg_pool)
+)]
+async fn insert_subscription_token(
+    subscription_id: &Uuid,
+    subscription_token: &str,
+    pg_pool: &PgPool,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        r#"
+        INSERT INTO subscription_tokens (subscription_id, subscription_token)
+        VALUES ($1, $2)
+        "#,
+        subscription_id,
+        subscription_token
     )
     .execute(pg_pool)
     .await
@@ -78,16 +122,19 @@ async fn insert_pending_subscriber(
 }
 
 #[tracing::instrument(
-    name = "Sending a confirmation email to a new subscriber",
-    skip(app_base_url, email_client, subscriber_email)
+    name = "Send a confirmation email to a new subscriber",
+    skip(app_base_url, email_client, subscriber_email, subscription_token)
 )]
 async fn send_confirmation_email(
     app_base_url: &str,
     email_client: web::Data<EmailClient>,
     subscriber_email: &SubscriberEmail,
+    subscription_token: &str,
 ) -> Result<(), reqwest::Error> {
-    // TODO: handle generate token later
-    let confirmation_link = format!("{}/subscriptions/confirm?token={}", app_base_url, "abc");
+    let confirmation_link = format!(
+        "{}/subscriptions/confirm?subscription_token={}",
+        app_base_url, subscription_token
+    );
     // TODO: make better form
     let subject = "Confirmation";
     let html_body = format!(
@@ -103,6 +150,15 @@ async fn send_confirmation_email(
     email_client
         .send_email(subscriber_email, subject, &text_body, &html_body)
         .await
+}
+
+// Generate Alphanumeric (A-Z, a-z, 0-9) 25-characters-long case-sensitive subscriptions token
+fn generate_subscription_token() -> String {
+    let mut rng = rand::thread_rng();
+    std::iter::repeat_with(|| rng.sample(Alphanumeric))
+        .map(char::from)
+        .take(25)
+        .collect()
 }
 
 impl TryInto<NewSubscriber> for NewSubscriberForm {
