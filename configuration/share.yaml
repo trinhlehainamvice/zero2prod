@@ -4,5 +4,6 @@ application:
   port: 8000
 database:
   engine: postgres
+  query_timeout_secs: 2
 email_client:
   request_timeout_millis: 5000

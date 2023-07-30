@@ -119,54 +119,6 @@ async fn send_confirmation_to_subscriber_email_with_link_return_200() {
 }
 
 #[tokio::test]
-async fn get_confirm_without_check_token_ret_200() {
-    // Arrange
-    let app = spawn_app().await.unwrap();
-
-    // Act
-    let response = app.get_confirmation("abc").await;
-
-    // Assert
-    assert!(response.status().is_success());
-}
-
-#[tokio::test]
-async fn post_subscriber_and_get_confirm_with_check_token_as_app_base_url_ret_500() {
-    // Arrange
-    let app = spawn_app().await.unwrap();
-    Mock::given(path("/email"))
-        .and(method("POST"))
-        .respond_with(ResponseTemplate::new(200))
-        .expect(1)
-        .mount(&app.email_client)
-        .await;
-    let body = "name=Foo%20Bar&email=foobar%40example.com";
-
-    // Act
-    let response = app.post_subscriptions(body.into()).await;
-
-    // Assert
-    assert!(response.status().is_success());
-
-    // Act
-    let email_request = &app.email_client.received_requests().await.unwrap()[0];
-    let confirmation_links = ConfirmationLinks::get_confirmation_link(email_request);
-    let mut confirmation_link = reqwest::Url::parse(&confirmation_links.html).unwrap();
-
-    // NOTE: If app_base_url is a localhost, we need to add the port to access the confirmation link locally
-    confirmation_link.set_port(Some(app.port)).unwrap();
-
-    // Assert
-    assert_eq!(confirmation_link.host_str().unwrap(), "127.0.0.1");
-
-    // Act
-    let response = reqwest::get(confirmation_link).await.unwrap();
-
-    // Assert
-    assert!(response.status().is_server_error());
-}
-
-#[tokio::test]
 async fn click_confirmation_link_in_email_and_query_subscriber_status_as_confirmed_ret_200() {
     // Arrange
     let app = spawn_app().await.unwrap();

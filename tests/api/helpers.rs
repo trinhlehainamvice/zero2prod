@@ -23,15 +23,6 @@ impl TestApp {
             .await
             .expect("Failed to execute request")
     }
-
-    pub async fn get_confirmation(&self, token: &str) -> reqwest::Response {
-        reqwest::Client::new()
-            .get(&format!("{}/subscriptions/confirm", self.addr))
-            .query(&[("token", token)])
-            .send()
-            .await
-            .expect("Failed to execute request")
-    }
 }
 
 static TRACING: Lazy<()> = Lazy::new(|| {

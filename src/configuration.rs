@@ -82,6 +82,8 @@ pub struct DatabaseSettings {
     pub host: String,
     pub database_name: String,
     pub require_ssl: bool,
+    #[serde(deserialize_with = "deserialize_number_from_string")]
+    pub query_timeout_secs: u64,
 }
 
 impl DatabaseSettings {

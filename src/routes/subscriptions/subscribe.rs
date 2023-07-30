@@ -14,6 +14,16 @@ pub struct NewSubscriberForm {
     email: String,
 }
 
+impl TryInto<NewSubscriber> for NewSubscriberForm {
+    type Error = String;
+    fn try_into(self) -> Result<NewSubscriber, Self::Error> {
+        Ok(NewSubscriber {
+            name: SubscriberName::parse(self.name)?,
+            email: SubscriberEmail::parse(self.email)?,
+        })
+    }
+}
+
 // Instrument wrap function into a Span
 // Instrument can capture arguments of function, but CAN'T capture local variables
 #[tracing::instrument(
@@ -171,14 +181,4 @@ fn generate_subscription_token() -> String {
         .map(char::from)
         .take(25)
         .collect()
-}
-
-impl TryInto<NewSubscriber> for NewSubscriberForm {
-    type Error = String;
-    fn try_into(self) -> Result<NewSubscriber, Self::Error> {
-        Ok(NewSubscriber {
-            name: SubscriberName::parse(self.name)?,
-            email: SubscriberEmail::parse(self.email)?,
-        })
-    }
 }
