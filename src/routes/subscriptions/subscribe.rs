@@ -1,6 +1,5 @@
 use crate::email_client::EmailClient;
 use crate::routes::domain::{NewSubscriber, SubscriberEmail, SubscriberName};
-use actix_web::http::StatusCode;
 use actix_web::{web, HttpResponse, ResponseError};
 use chrono::Utc;
 use rand::distributions::Alphanumeric;
@@ -26,47 +25,19 @@ impl TryInto<NewSubscriber> for NewSubscriberForm {
     }
 }
 
+#[derive(thiserror::Error)]
 pub enum SubscribeError {
-    Validation(String),
-    TransactionBegin(sqlx::Error),
-    InsertPendingSubscriber(sqlx::Error),
-    InsertSubscriptionToken(InsertSubscriptionError),
-    TransactionCommit(sqlx::Error),
-    SendConfirmationEmail(reqwest::Error),
+    #[error("{0}")]
+    InvalidSubscriptionForm(String),
+    #[error("{1}")]
+    UnexpectedError(#[source] Box<dyn std::error::Error>, String),
 }
 
 impl ResponseError for SubscribeError {
-    fn status_code(&self) -> StatusCode {
+    fn status_code(&self) -> actix_web::http::StatusCode {
         match self {
-            SubscribeError::Validation(_) => StatusCode::BAD_REQUEST,
-            SubscribeError::InsertSubscriptionToken(_)
-            | SubscribeError::TransactionBegin(_)
-            | SubscribeError::SendConfirmationEmail(_)
-            | SubscribeError::InsertPendingSubscriber(_)
-            | SubscribeError::TransactionCommit(_) => StatusCode::INTERNAL_SERVER_ERROR,
-        }
-    }
-}
-
-impl Display for SubscribeError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SubscribeError::Validation(_) => write!(f, "Invalid subscription form"),
-            SubscribeError::TransactionBegin(_) => {
-                write!(f, "Failed to begin a transaction")
-            }
-            SubscribeError::InsertSubscriptionToken(_) => {
-                write!(f, "Failed to insert subscription token")
-            }
-            SubscribeError::SendConfirmationEmail(_) => {
-                write!(f, "Failed to send confirmation email")
-            }
-            SubscribeError::InsertPendingSubscriber(_) => {
-                write!(f, "Failed to insert new pending subscriber")
-            }
-            SubscribeError::TransactionCommit(_) => {
-                write!(f, "Failed to commit a transaction")
-            }
+            SubscribeError::InvalidSubscriptionForm(_) => actix_web::http::StatusCode::BAD_REQUEST,
+            _ => actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
@@ -74,37 +45,6 @@ impl Display for SubscribeError {
 impl Debug for SubscribeError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         error_chain_fmt(self, f)
-    }
-}
-
-impl std::error::Error for SubscribeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            SubscribeError::Validation(_) => None,
-            SubscribeError::TransactionBegin(e) => Some(e),
-            SubscribeError::InsertSubscriptionToken(e) => Some(e),
-            SubscribeError::InsertPendingSubscriber(e) => Some(e),
-            SubscribeError::TransactionCommit(e) => Some(e),
-            SubscribeError::SendConfirmationEmail(e) => Some(e),
-        }
-    }
-}
-
-impl From<String> for SubscribeError {
-    fn from(e: String) -> Self {
-        SubscribeError::Validation(e)
-    }
-}
-
-impl From<InsertSubscriptionError> for SubscribeError {
-    fn from(e: InsertSubscriptionError) -> Self {
-        SubscribeError::InsertSubscriptionToken(e)
-    }
-}
-
-impl From<reqwest::Error> for SubscribeError {
-    fn from(e: reqwest::Error) -> Self {
-        SubscribeError::SendConfirmationEmail(e)
     }
 }
 
@@ -124,29 +64,36 @@ pub async fn subscribe(
     email_client: web::Data<EmailClient>,
     app_base_url: web::Data<String>,
 ) -> Result<HttpResponse, SubscribeError> {
-    let mut transaction = pg_pool
-        .begin()
-        .await
-        .map_err(SubscribeError::TransactionBegin)?;
+    let mut transaction = pg_pool.begin().await.map_err(|e| {
+        SubscribeError::UnexpectedError(Box::new(e), "Failed to begin database transaction".into())
+    })?;
 
-    let subscriber: NewSubscriber = subscriber.try_into()?;
+    let subscriber: NewSubscriber = subscriber
+        .try_into()
+        .map_err(SubscribeError::InvalidSubscriptionForm)?;
 
     let subscription_id = insert_pending_subscriber(&subscriber, &mut transaction)
         .await
-        .map_err(SubscribeError::InsertPendingSubscriber)?;
+        .map_err(|e| {
+            SubscribeError::UnexpectedError(Box::new(e), "Failed to insert new subscriber".into())
+        })?;
 
     let subscription_token = generate_subscription_token();
     insert_subscription_token(&subscription_id, &subscription_token, &mut transaction)
         .await
-        .map_err(SubscribeError::InsertSubscriptionToken)?;
+        .map_err(|e| {
+            SubscribeError::UnexpectedError(
+                Box::new(e),
+                "Failed to insert subscription token".into(),
+            )
+        })?;
 
     // Use Transaction to guarantee all database queries in one request is failed or success all together
     // To avoid fault states in database
     // Usually use when there are multiple `INSERT` or `UPDATE` queries
-    transaction
-        .commit()
-        .await
-        .map_err(SubscribeError::TransactionCommit)?;
+    transaction.commit().await.map_err(|e| {
+        SubscribeError::UnexpectedError(Box::new(e), "Failed to commit database transaction".into())
+    })?;
 
     // Need to insert subscription token into database before sending confirmation email
     send_confirmation_email(
@@ -155,7 +102,10 @@ pub async fn subscribe(
         &subscriber.email,
         &subscription_token,
     )
-    .await?;
+    .await
+    .map_err(|e| {
+        SubscribeError::UnexpectedError(Box::new(e), "Failed to send confirmation email".into())
+    })?;
 
     Ok(HttpResponse::Ok().finish())
 }
@@ -193,6 +143,7 @@ impl ResponseError for InsertSubscriptionError {}
 
 fn error_chain_fmt(e: &impl std::error::Error, f: &mut Formatter<'_>) -> std::fmt::Result {
     writeln!(f, "{}\n", e)?;
+    // Retrieve all underlying layers errors
     let mut current = e.source();
     while let Some(cause) = current {
         writeln!(f, "Caused by:\n\t{}", cause)?;
