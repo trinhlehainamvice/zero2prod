@@ -37,7 +37,7 @@ pub async fn confirm(
 }
 
 #[tracing::instrument(
-    name = "Get subscription id from the subscription_tokens by subscription token"
+    name = "Get subscription_id from the subscription_tokens by subscription_token"
     skip(subscription_token, pg_pool)
 )]
 async fn get_subscription_id_from_subscription_tokens(
