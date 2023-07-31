@@ -64,7 +64,14 @@ impl std::fmt::Debug for PublishError {
     }
 }
 
-#[tracing::instrument(name = "Publish a newsletter letter", skip_all)]
+#[tracing::instrument(
+    name = "Publish a newsletter letter",
+    skip_all,
+    fields(
+        username = tracing::field::Empty,
+        user_id = tracing::field::Empty
+    )
+)]
 pub async fn publish_newsletter(
     web::Json(payload): web::Json<NewsletterPayload>,
     pg_pool: web::Data<PgPool>,
@@ -73,7 +80,10 @@ pub async fn publish_newsletter(
 ) -> Result<HttpResponse, PublishError> {
     let credentials =
         get_credentials_from_basic_auth(request.headers()).map_err(PublishError::AuthFailed)?;
-    let _user_id = validate_credentials(&pg_pool, &credentials).await?;
+    tracing::Span::current().record("username", tracing::field::display(&credentials.username));
+
+    let user_id = validate_credentials(&pg_pool, &credentials).await?;
+    tracing::Span::current().record("user_id", tracing::field::display(&user_id));
 
     let confirmed_subscribers = get_confirmed_subscribers(&pg_pool).await.unwrap();
     for subscriber in confirmed_subscribers {
