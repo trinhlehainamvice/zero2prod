@@ -56,3 +56,31 @@ async fn publish_newsletters_invalid_form_data_ret_400() {
         assert_eq!(response.status().as_u16(), 400);
     }
 }
+
+#[tokio::test]
+async fn publish_newsletters_without_authentication_ret_401() {
+    // Arrange
+    let app = spawn_app().await.unwrap();
+    let newsletter_body = serde_json::json!({
+        "title": "Newsletter title",
+        "content": {
+            "text": "Newsletter body as plain text",
+            "html": "<p>Newsletter body as HTML</p>"
+        }
+    });
+
+    // Act
+    let response = reqwest::Client::new()
+        .post(&format!("{}/newsletters", app.addr))
+        .json(&newsletter_body)
+        .send()
+        .await
+        .expect("Failed to execute request");
+
+    // Assert
+    assert_eq!(response.status().as_u16(), 401);
+    assert_eq!(
+        response.headers()["WWW-Authenticate"],
+        r#"Basic realm="publish""#
+    );
+}
