@@ -4,10 +4,11 @@ use actix_web::http::header::HeaderMap;
 use actix_web::http::{header, StatusCode};
 use actix_web::{web, HttpRequest, HttpResponse, ResponseError};
 use anyhow::Context;
+use argon2::password_hash::Salt;
+use argon2::{Algorithm, PasswordHasher, Version};
 use base64::Engine;
 use reqwest::header::HeaderValue;
 use secrecy::{ExposeSecret, Secret};
-use sha3::Digest;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -182,9 +183,12 @@ async fn validate_credentials(
     credentials: Credentials,
     pg_pool: &PgPool,
 ) -> Result<Uuid, anyhow::Error> {
+    let param = argon2::Params::new(15000, 2, 1, None)?;
+    let hash = argon2::Argon2::new(Algorithm::Argon2d, Version::V0x13, param);
+
     let result = sqlx::query!(
         r#"
-        SELECT user_id, password_hash
+        SELECT user_id, password_hash, salt
         FROM users
         WHERE username = $1
         "#,
@@ -194,15 +198,17 @@ async fn validate_credentials(
     .await
     .context("Failed to validate credentials")?;
 
-    let (user_id, expected_password_hash) = match result {
-        Some(result) => (result.user_id, result.password_hash),
+    let (user_id, expected_password_hash, salt) = match result {
+        Some(result) => (result.user_id, result.password_hash, result.salt),
         None => return Err(anyhow::anyhow!("Invalid username")),
     };
 
-    let password_hash = sha3::Sha3_256::digest(credentials.password.expose_secret().as_bytes());
-    let password_hash = format!("{:x}", password_hash);
+    let salt = Salt::from_b64(salt.as_str())?;
 
-    if password_hash != expected_password_hash {
+    let password_hash =
+        hash.hash_password(credentials.password.expose_secret().as_bytes(), salt)?;
+
+    if password_hash.to_string() != expected_password_hash {
         return Err(anyhow::anyhow!("Invalid password"));
     }
 
