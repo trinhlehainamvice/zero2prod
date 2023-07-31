@@ -64,6 +64,19 @@ impl std::fmt::Debug for PublishError {
     }
 }
 
+fn spawn_blocking_task_with_tracing<Func, Ret>(f: Func) -> tokio::task::JoinHandle<Ret>
+where
+    Func: FnOnce() -> Ret + Send + 'static,
+    Ret: Send + 'static,
+{
+    // Spawn a new thread to handle this task, also new span will be created in this new thread
+    // Need to pass span of thread than spawned task to block thread, for that thread can subscribe to parent span
+    let current_span = tracing::Span::current();
+    // Hash password consume a lot of CPU, may cause blocking request handle thread
+    // So pass computational heavy task to another thread to allow request handle thread continue to run
+    tokio::task::spawn_blocking(move || current_span.in_scope(f))
+}
+
 #[tracing::instrument(
     name = "Publish a newsletter letter",
     skip_all,
@@ -82,7 +95,7 @@ pub async fn publish_newsletter(
         get_credentials_from_basic_auth(request.headers()).map_err(PublishError::AuthFailed)?;
     tracing::Span::current().record("username", tracing::field::display(&credentials.username));
 
-    let user_id = validate_credentials(&pg_pool, &credentials).await?;
+    let user_id = validate_credentials(&pg_pool, credentials).await?;
     tracing::Span::current().record("user_id", tracing::field::display(&user_id));
 
     let confirmed_subscribers = get_confirmed_subscribers(&pg_pool).await.unwrap();
@@ -209,7 +222,7 @@ async fn get_credentials_from_database(
 #[tracing::instrument(name = "Validate credentials from database", skip_all)]
 async fn validate_credentials(
     pg_pool: &PgPool,
-    credentials: &Credentials,
+    credentials: Credentials,
 ) -> Result<Uuid, PublishError> {
     let (user_id, expected_password_hash) =
         get_credentials_from_database(pg_pool, &credentials.username)
@@ -219,18 +232,26 @@ async fn validate_credentials(
                 "Unknown username"
             )))?;
 
+    spawn_blocking_task_with_tracing(move || {
+        verify_password_hash(credentials.password, expected_password_hash)
+    })
+    .await
+    .context("Failed to spawn blocking task")
+    .map_err(PublishError::Unexpected)??;
+
+    Ok(user_id)
+}
+
+#[tracing::instrument(name = "Verify password hash", skip_all)]
+fn verify_password_hash(
+    password: Secret<String>,
+    expected_password_hash: Secret<String>,
+) -> Result<(), PublishError> {
     let parsed_hash = PasswordHash::new(expected_password_hash.expose_secret())
         .map_err(|e| PublishError::Unexpected(anyhow::anyhow!(e)))?;
 
-    tracing::info_span!("Verify password hash")
-        .in_scope(|| {
-            Argon2::default().verify_password(
-                credentials.password.expose_secret().as_bytes(),
-                &parsed_hash,
-            )
-        })
+    Argon2::default()
+        .verify_password(password.expose_secret().as_bytes(), &parsed_hash)
         .context("Failed to verify password hash")
-        .map_err(PublishError::AuthFailed)?;
-
-    Ok(user_id)
+        .map_err(PublishError::AuthFailed)
 }
