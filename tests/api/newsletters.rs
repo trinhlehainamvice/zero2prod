@@ -58,7 +58,7 @@ async fn publish_newsletters_invalid_form_data_ret_400() {
 }
 
 #[tokio::test]
-async fn publish_newsletters_without_authentication_ret_401() {
+async fn publish_newsletters_without_authentication_header_ret_401() {
     // Arrange
     let app = spawn_app().await.unwrap();
     let newsletter_body = serde_json::json!({
@@ -83,4 +83,23 @@ async fn publish_newsletters_without_authentication_ret_401() {
         response.headers()["WWW-Authenticate"],
         r#"Basic realm="publish""#
     );
+}
+
+#[tokio::test]
+async fn publish_newsletters_as_valid_user_ret_200() {
+    // Arrange
+    let app = spawn_app().await.unwrap();
+    let newsletter_body = serde_json::json!({
+        "title": "Newsletter title",
+        "content": {
+            "text": "Newsletter body as plain text",
+            "html": "<p>Newsletter body as HTML</p>"
+        }
+    });
+
+    // Act
+    let response = app.post_newsletters(newsletter_body).await;
+
+    // Assert
+    assert_eq!(response.status().as_u16(), 200);
 }

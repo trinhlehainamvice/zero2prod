@@ -1,3 +1,6 @@
+use fake::faker::internet::en::Password;
+use fake::faker::name::en::Name;
+use fake::Fake;
 use once_cell::sync::Lazy;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use uuid::Uuid;
@@ -12,6 +15,7 @@ pub struct TestApp {
     pub port: u16,
     pub pg_pool: PgPool,
     pub email_client: MockServer,
+    pub test_user: TestUser,
 }
 
 impl TestApp {
@@ -29,7 +33,10 @@ impl TestApp {
         reqwest::Client::new()
             .post(&format!("{}/newsletters", self.addr))
             .json(&body)
-            .basic_auth(Uuid::new_v4().to_string(), Some(Uuid::new_v4().to_string()))
+            .basic_auth(
+                self.test_user.username.clone(),
+                Some(self.test_user.password.clone()),
+            )
             .send()
             .await
             .expect("Failed to execute request")
@@ -103,13 +110,16 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
         settings
     };
 
-    let db_connection_pool = get_test_database(&settings.database).await;
-    let app = Application::build(db_connection_pool.clone(), settings)
+    let pg_pool = get_test_database(&settings.database).await;
+    let app = Application::build(pg_pool.clone(), settings)
         .await
         .expect("Failed to build Server");
 
     let port = app.port();
     let addr = format!("http://127.0.0.1:{}", port);
+
+    let test_user = TestUser::generate();
+    test_user.create_user(&pg_pool).await;
 
     // tokio spawn background thread an run app
     // We want to hold thread instance until tests finish (or end of tokio::test)
@@ -119,8 +129,9 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
     Ok(TestApp {
         addr,
         port,
-        pg_pool: db_connection_pool,
+        pg_pool,
         email_client,
+        test_user,
     })
 }
 
@@ -175,4 +186,34 @@ async fn get_test_database(database: &DatabaseSettings) -> PgPool {
         .expect("Failed to migrate the database");
 
     connection_pool
+}
+
+pub struct TestUser {
+    pub user_id: Uuid,
+    pub username: String,
+    pub password: String,
+}
+
+impl TestUser {
+    pub fn generate() -> Self {
+        Self {
+            user_id: Uuid::new_v4(),
+            username: Name().fake(),
+            password: Password(8..20).fake(),
+        }
+    }
+
+    pub async fn create_user(&self, pg_pool: &PgPool) {
+        sqlx::query!(
+            r#"INSERT INTO users (user_id, username, password)
+            VALUES ($1, $2, $3)
+            "#,
+            self.user_id,
+            self.username,
+            self.password
+        )
+        .execute(pg_pool)
+        .await
+        .expect("Failed to create user to test database");
+    }
 }

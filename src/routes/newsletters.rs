@@ -6,8 +6,9 @@ use actix_web::{web, HttpRequest, HttpResponse, ResponseError};
 use anyhow::Context;
 use base64::Engine;
 use reqwest::header::HeaderValue;
-use secrecy::Secret;
+use secrecy::{ExposeSecret, Secret};
 use sqlx::PgPool;
+use uuid::Uuid;
 
 #[derive(serde::Deserialize)]
 pub struct NewsletterPayload {
@@ -69,8 +70,12 @@ pub async fn publish_newsletter(
     email_client: web::Data<EmailClient>,
     request: HttpRequest,
 ) -> Result<HttpResponse, PublishError> {
-    let _credentials =
+    let credentials =
         get_credentials_from_basic_auth(request.headers()).map_err(PublishError::Unauthorized)?;
+    let _user_id = validate_credentials(credentials, &pg_pool)
+        .await
+        .map_err(PublishError::Unauthorized)?;
+
     let confirmed_subscribers = get_confirmed_subscribers(&pg_pool).await.unwrap();
     for subscriber in confirmed_subscribers {
         match subscriber {
@@ -141,15 +146,16 @@ fn get_credentials_from_basic_auth(header: &HeaderMap) -> Result<Credentials, an
         .get("Authorization")
         .context("No `Authorization` header found")?
         .to_str()
-        .context("`Authorization` header is not a valid UTF8")?;
+        .context("`Authorization` header's value is not valid UTF8")?;
 
     let base64encoded_segment = header_value
-        .strip_prefix("Basic")
-        .context("`Authorization` header does not start with `Basic`")?;
+        // Remove `Basic` and Padding ` ` -> `Basic `
+        .strip_prefix("Basic ")
+        .context("`Authorization` header's does not start with `Basic `")?;
 
     let decoded_bytes = base64::engine::general_purpose::STANDARD
         .decode(base64encoded_segment)
-        .context("Failed to base64 decode value in `Basic Authorization` header")?;
+        .context("Failed to base64 decode value `Basic Authorization` header's value to bytes")?;
 
     let decoded_credentials =
         String::from_utf8(decoded_bytes).context("decoded bytes is not valid UTF8")?;
@@ -168,4 +174,29 @@ fn get_credentials_from_basic_auth(header: &HeaderMap) -> Result<Credentials, an
         username,
         password: Secret::new(password),
     })
+}
+
+#[tracing::instrument(name = "Validate credentials from database", skip_all)]
+async fn validate_credentials(
+    credentials: Credentials,
+    pg_pool: &PgPool,
+) -> Result<Uuid, anyhow::Error> {
+    struct Result {
+        user_id: Uuid,
+    }
+    let Result { user_id } = sqlx::query_as!(
+        Result,
+        r#"
+        SELECT user_id
+        FROM users
+        WHERE username = $1 AND password = $2
+        "#,
+        credentials.username,
+        credentials.password.expose_secret()
+    )
+    .fetch_one(pg_pool)
+    .await
+    .context("Failed to validate credentials")?;
+
+    Ok(user_id)
 }
