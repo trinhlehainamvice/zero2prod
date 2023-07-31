@@ -7,6 +7,7 @@ use anyhow::Context;
 use base64::Engine;
 use reqwest::header::HeaderValue;
 use secrecy::{ExposeSecret, Secret};
+use sha3::Digest;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -181,22 +182,29 @@ async fn validate_credentials(
     credentials: Credentials,
     pg_pool: &PgPool,
 ) -> Result<Uuid, anyhow::Error> {
-    struct Result {
-        user_id: Uuid,
-    }
-    let Result { user_id } = sqlx::query_as!(
-        Result,
+    let result = sqlx::query!(
         r#"
-        SELECT user_id
+        SELECT user_id, password_hash
         FROM users
-        WHERE username = $1 AND password = $2
+        WHERE username = $1
         "#,
         credentials.username,
-        credentials.password.expose_secret()
     )
-    .fetch_one(pg_pool)
+    .fetch_optional(pg_pool)
     .await
     .context("Failed to validate credentials")?;
+
+    let (user_id, expected_password_hash) = match result {
+        Some(result) => (result.user_id, result.password_hash),
+        None => return Err(anyhow::anyhow!("Invalid username")),
+    };
+
+    let password_hash = sha3::Sha3_256::digest(credentials.password.expose_secret().as_bytes());
+    let password_hash = format!("{:x}", password_hash);
+
+    if password_hash != expected_password_hash {
+        return Err(anyhow::anyhow!("Invalid password"));
+    }
 
     Ok(user_id)
 }
