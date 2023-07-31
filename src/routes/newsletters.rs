@@ -32,21 +32,21 @@ pub enum PublishError {
     #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
     #[error("Authorization failed.")]
-    Unauthorized(#[source] anyhow::Error),
+    AuthFailed(#[source] anyhow::Error),
 }
 
 impl ResponseError for PublishError {
     fn status_code(&self) -> StatusCode {
         match self {
             PublishError::Unexpected(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            PublishError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            PublishError::AuthFailed(_) => StatusCode::UNAUTHORIZED,
         }
     }
 
     fn error_response(&self) -> HttpResponse {
         match self {
             PublishError::Unexpected(_) => HttpResponse::new(StatusCode::INTERNAL_SERVER_ERROR),
-            PublishError::Unauthorized(_) => {
+            PublishError::AuthFailed(_) => {
                 let mut response = HttpResponse::new(StatusCode::UNAUTHORIZED);
                 let header_value = HeaderValue::from_str(r#"Basic realm="publish""#).unwrap();
                 response
@@ -72,10 +72,8 @@ pub async fn publish_newsletter(
     request: HttpRequest,
 ) -> Result<HttpResponse, PublishError> {
     let credentials =
-        get_credentials_from_basic_auth(request.headers()).map_err(PublishError::Unauthorized)?;
-    let _user_id = validate_credentials(credentials, &pg_pool)
-        .await
-        .map_err(PublishError::Unauthorized)?;
+        get_credentials_from_basic_auth(request.headers()).map_err(PublishError::AuthFailed)?;
+    let _user_id = validate_credentials(&pg_pool, &credentials).await?;
 
     let confirmed_subscribers = get_confirmed_subscribers(&pg_pool).await.unwrap();
     for subscriber in confirmed_subscribers {
@@ -177,38 +175,52 @@ fn get_credentials_from_basic_auth(header: &HeaderMap) -> Result<Credentials, an
     })
 }
 
-#[tracing::instrument(name = "Validate credentials from database", skip_all)]
-async fn validate_credentials(
-    credentials: Credentials,
+#[tracing::instrument(name = "Get credentials from database", skip_all)]
+async fn get_credentials_from_database(
     pg_pool: &PgPool,
-) -> Result<Uuid, anyhow::Error> {
-    let result = sqlx::query!(
+    username: &str,
+) -> Result<Option<(Uuid, Secret<String>)>, anyhow::Error> {
+    let credentials = sqlx::query!(
         r#"
         SELECT user_id, password_hash
         FROM users
         WHERE username = $1
         "#,
-        credentials.username,
+        username
     )
     .fetch_optional(pg_pool)
     .await
-    .context("Failed to validate credentials")?;
+    .context("Failed to fetch credentials from database")?
+    .map(|row| (row.user_id, Secret::new(row.password_hash)));
 
-    let (user_id, expected_password_hash) = match result {
-        Some(result) => (result.user_id, result.password_hash),
-        None => return Err(anyhow::anyhow!("Invalid username")),
-    };
+    Ok(credentials)
+}
 
-    let parsed_hash = PasswordHash::new(&expected_password_hash)?;
-    if Argon2::default()
-        .verify_password(
-            credentials.password.expose_secret().as_bytes(),
-            &parsed_hash,
-        )
-        .is_err()
-    {
-        return Err(anyhow::anyhow!("Invalid password"));
-    }
+#[tracing::instrument(name = "Validate credentials from database", skip_all)]
+async fn validate_credentials(
+    pg_pool: &PgPool,
+    credentials: &Credentials,
+) -> Result<Uuid, PublishError> {
+    let (user_id, expected_password_hash) =
+        get_credentials_from_database(pg_pool, &credentials.username)
+            .await
+            .map_err(PublishError::Unexpected)?
+            .ok_or(PublishError::AuthFailed(anyhow::anyhow!(
+                "Unknown username"
+            )))?;
+
+    let parsed_hash = PasswordHash::new(expected_password_hash.expose_secret())
+        .map_err(|e| PublishError::Unexpected(anyhow::anyhow!(e)))?;
+
+    tracing::info_span!("Verify password hash")
+        .in_scope(|| {
+            Argon2::default().verify_password(
+                credentials.password.expose_secret().as_bytes(),
+                &parsed_hash,
+            )
+        })
+        .context("Failed to verify password hash")
+        .map_err(PublishError::AuthFailed)?;
 
     Ok(user_id)
 }
