@@ -1,5 +1,6 @@
 use crate::email_client::EmailClient;
 use crate::routes::domain::{NewSubscriber, SubscriberEmail, SubscriberName};
+use crate::routes::error_chain_fmt;
 use actix_web::{web, HttpResponse, ResponseError};
 use anyhow::Context;
 use chrono::Utc;
@@ -9,7 +10,6 @@ use serde::Deserialize;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::fmt::{Debug, Display, Formatter};
 use uuid::Uuid;
-use crate::routes::error_chain_fmt;
 
 #[derive(Deserialize)]
 pub struct NewSubscriberForm {
@@ -137,7 +137,6 @@ async fn insert_pending_subscriber(
 pub struct InsertSubscriptionError(sqlx::Error);
 
 impl ResponseError for InsertSubscriptionError {}
-
 
 impl std::error::Error for InsertSubscriptionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
