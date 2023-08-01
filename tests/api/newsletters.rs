@@ -1,4 +1,5 @@
 use crate::helpers::spawn_app;
+use uuid::Uuid;
 
 #[tokio::test]
 async fn publish_newsletters_unconfirmed_email_ret_500() {
@@ -102,4 +103,60 @@ async fn publish_newsletters_as_valid_user_ret_200() {
 
     // Assert
     assert_eq!(response.status().as_u16(), 200);
+}
+
+#[tokio::test]
+async fn publish_newsletters_as_invalid_username_ret_401() {
+    // Arrange
+    let app = spawn_app().await.unwrap();
+    let newsletter_body = serde_json::json!({
+        "title": "Newsletter title",
+        "content": {
+            "text": "Newsletter body as plain text",
+            "html": "<p>Newsletter body as HTML</p>"
+        }
+    });
+
+    let username = Uuid::new_v4().to_string();
+    let password = Uuid::new_v4().to_string();
+
+    // Act
+    let response = reqwest::Client::new()
+        .post(&format!("{}/newsletters", app.addr))
+        .json(&newsletter_body)
+        .basic_auth(username, Some(password))
+        .send()
+        .await
+        .expect("Failed to execute request");
+
+    // Assert
+    assert_eq!(response.status().as_u16(), 401);
+}
+
+#[tokio::test]
+async fn publish_newsletters_as_invalid_password_ret_401() {
+    // Arrange
+    let app = spawn_app().await.unwrap();
+    let newsletter_body = serde_json::json!({
+        "title": "Newsletter title",
+        "content": {
+            "text": "Newsletter body as plain text",
+            "html": "<p>Newsletter body as HTML</p>"
+        }
+    });
+
+    let username = app.test_user.username;
+    let password = Uuid::new_v4().to_string();
+
+    // Act
+    let response = reqwest::Client::new()
+        .post(&format!("{}/newsletters", app.addr))
+        .json(&newsletter_body)
+        .basic_auth(username, Some(password))
+        .send()
+        .await
+        .expect("Failed to execute request");
+
+    // Assert
+    assert_eq!(response.status().as_u16(), 401);
 }
