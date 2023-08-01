@@ -19,7 +19,7 @@ impl Settings {
         let config_dir = base_path.join("configuration");
 
         let app_env_state: Environment = std::env::var(APP_ENV_STATE)
-            .unwrap_or(LOCAL.to_string())
+            .unwrap_or_else(|_| LOCAL.to_string())
             .try_into()
             // .expect(&format!("Failed to parse {}", APP_ENV_STATE));
             // `clippy` suggest to use `unwrap_or_else` instead of `expect` when use a function call

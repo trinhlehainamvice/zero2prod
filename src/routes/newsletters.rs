@@ -225,14 +225,23 @@ async fn validate_credentials(
     pg_pool: &PgPool,
     credentials: Credentials,
 ) -> Result<Uuid, PublishError> {
-    let (user_id, expected_password_hash) =
+    const HASHED_PASSWORD_IF_INVALID_USERNAME: &str = "$argon2d$v=19$m=15000,t=2,p=1\
+        $QhQyHN2/VvKTi5QYqo+VZA\
+        $JkXwR/rdESxDi2DfcCf8lk2U4+ShyN3CXZATJQvP0lg";
+    let mut user_id = None;
+    let mut expected_password_hash = Secret::new(HASHED_PASSWORD_IF_INVALID_USERNAME.to_string());
+
+    if let Some((stored_user_id, stored_password_hash)) =
         get_credentials_from_database(pg_pool, &credentials.username)
             .await
             .map_err(PublishError::Unexpected)?
-            .ok_or(PublishError::AuthFailed(anyhow::anyhow!(
-                "Unknown username"
-            )))?;
+    {
+        user_id = Some(stored_user_id);
+        expected_password_hash = stored_password_hash;
+    }
 
+    // Always verify password hash even if username is invalid
+    // Prevent timing attack to guest valid username from database
     spawn_blocking_task_with_tracing(move || {
         verify_password_hash(credentials.password, expected_password_hash)
     })
@@ -240,7 +249,8 @@ async fn validate_credentials(
     .context("Failed to spawn blocking task")
     .map_err(PublishError::Unexpected)??;
 
-    Ok(user_id)
+    // Validation is satisfied when both user_id and password hash_are valid
+    user_id.ok_or_else(|| PublishError::AuthFailed(anyhow::anyhow!("Invalid username or password")))
 }
 
 #[tracing::instrument(name = "Verify password hash", skip_all)]

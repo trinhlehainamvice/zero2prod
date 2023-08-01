@@ -20,7 +20,8 @@ where
     // Get RUST_LOG environment variable
     // If not set, default value is "info"
     // RUST_LOG=info cargo <command> <args>
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or(EnvFilter::new(default_log_level));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_log_level));
 
     // Format Span with Bunyan format and output to stdout
     let formatting_layer = BunyanFormattingLayer::new(name.into(), sink);
