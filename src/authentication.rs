@@ -27,6 +27,7 @@ pub struct Credentials {
     pub password: Secret<String>,
 }
 
+#[tracing::instrument(name = "Extract credentials from Request header", skip_all)]
 pub fn get_credentials_from_basic_auth(header: &HeaderMap) -> Result<Credentials, anyhow::Error> {
     // Get the `Authorization` header with valid UTF8 string
     let header_value = header
@@ -64,7 +65,7 @@ pub fn get_credentials_from_basic_auth(header: &HeaderMap) -> Result<Credentials
 }
 
 #[tracing::instrument(name = "Get credentials from database", skip_all)]
-pub async fn get_credentials_from_database(
+async fn get_credentials_from_database(
     pg_pool: &PgPool,
     username: &str,
 ) -> Result<Option<(Uuid, Secret<String>)>, anyhow::Error> {
