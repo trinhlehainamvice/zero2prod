@@ -1,6 +1,6 @@
 use crate::email_client::EmailClient;
+use crate::error_chain_fmt;
 use crate::routes::domain::{NewSubscriber, SubscriberEmail, SubscriberName};
-use crate::routes::error_chain_fmt;
 use actix_web::{web, HttpResponse, ResponseError};
 use anyhow::Context;
 use chrono::Utc;

@@ -1,5 +1,9 @@
+mod authentication;
 pub mod configuration;
-pub mod email_client;
-pub mod routes;
+mod email_client;
+mod helper;
+mod routes;
 pub mod startup;
 pub mod telemetry;
+
+pub use helper::*;

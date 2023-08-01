@@ -9,7 +9,7 @@ database:
   database_name: newsletter
   require_ssl: false
 email_client:
-  api_base_url: http://127.0.0.1:1080
+  api_base_url: localhost
   sender_email: 9YfJ5@example.com
   auth_header: X-Mail-Server-Token
   auth_token: secret_token
