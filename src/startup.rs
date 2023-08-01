@@ -1,3 +1,4 @@
+use crate::authentication::HmacSecret;
 use crate::configuration::{DatabaseSettings, EmailClientSettings, Settings};
 use crate::email_client::EmailClient;
 use crate::routes::{
@@ -29,6 +30,7 @@ impl Application {
         let pg_pool = Data::new(pg_pool);
         let email_client = Data::new(email_client);
         let app_base_url = Data::new(settings.application.base_url);
+        let hmac_secret = Data::new(HmacSecret(settings.application.hmac_secret));
 
         // Actix-web runtime that have multiple threads
         let server = HttpServer::new(move || {
@@ -48,6 +50,7 @@ impl Application {
                 .app_data(pg_pool.clone())
                 .app_data(email_client.clone())
                 .app_data(app_base_url.clone())
+                .app_data(hmac_secret.clone())
         })
         .listen(listener)?
         .run();
