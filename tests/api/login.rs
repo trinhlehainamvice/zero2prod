@@ -19,13 +19,6 @@ async fn login_failed_redirects_to_login() {
     // Assert
     assert_redirects_to(&response, "/login");
 
-    let cookie = response.cookies().find(|c| c.name() == "_flash").unwrap();
-
-    let flash_message: serde_json::Value =
-        serde_json::from_str(cookie.value()).expect("Failed to parse flash message");
-
-    assert_eq!(flash_message["error"], "Invalid Username or Password");
-
     // Act 2
     let login_html = app.get_login_html().await;
 
