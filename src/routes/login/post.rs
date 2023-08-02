@@ -1,12 +1,10 @@
-use crate::authentication::{validate_credentials, AuthError, Credentials, HmacSecret};
+use crate::authentication::{validate_credentials, AuthError, Credentials};
 use crate::error_chain_fmt;
-use actix_web::cookie::Cookie;
-use actix_web::error::InternalError;
-use actix_web::{web, HttpResponse};
-use hmac::{Hmac, Mac};
+use actix_web::http::StatusCode;
+use actix_web::{web, HttpResponse, ResponseError};
+use actix_web_flash_messages::FlashMessage;
 use reqwest::header::LOCATION;
-use secrecy::{ExposeSecret, Secret};
-use sha2::Sha256;
+use secrecy::Secret;
 use sqlx::PgPool;
 use std::fmt::Debug;
 
@@ -24,6 +22,18 @@ impl Debug for LoginError {
     }
 }
 
+impl ResponseError for LoginError {
+    fn status_code(&self) -> StatusCode {
+        StatusCode::SEE_OTHER
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        HttpResponse::SeeOther()
+            .insert_header((LOCATION, "/login"))
+            .finish()
+    }
+}
+
 #[derive(serde::Deserialize)]
 pub struct UserLoginForm {
     username: String,
@@ -32,7 +42,7 @@ pub struct UserLoginForm {
 
 #[tracing::instrument(
     name = "Login a user input", 
-    skip(login_form, pg_pool, hmac_secret),
+    skip(login_form, pg_pool),
     fields(
     username=tracing::field::Empty,
     user_id=tracing::field::Empty
@@ -41,8 +51,7 @@ pub struct UserLoginForm {
 pub async fn login(
     web::Form(login_form): web::Form<UserLoginForm>,
     pg_pool: web::Data<PgPool>,
-    hmac_secret: web::Data<HmacSecret>,
-) -> Result<HttpResponse, InternalError<LoginError>> {
+) -> Result<HttpResponse, LoginError> {
     let credentials = Credentials {
         username: login_form.username,
         password: login_form.password,
@@ -62,28 +71,9 @@ pub async fn login(
                 AuthError::UnexpectedError(_) => LoginError::UnexpectedError(error.into()),
             };
 
-            let query_string = format!("error={}", error);
+            FlashMessage::error(error.to_string()).send();
 
-            let hmac_tag = {
-                let mut mac = Hmac::<Sha256>::new_from_slice(
-                    hmac_secret.as_ref().0.expose_secret().as_bytes(),
-                )
-                .unwrap();
-                mac.update(query_string.as_bytes());
-                mac.finalize().into_bytes()
-            };
-
-            let flash_message = serde_json::json!({
-                "error": error.to_string(),
-                "tag": format!("{:x}", hmac_tag)
-            });
-
-            let response = HttpResponse::SeeOther()
-                .insert_header((LOCATION, "/login"))
-                .cookie(Cookie::new("_flash", flash_message.to_string()))
-                .finish();
-
-            Err(InternalError::from_response(error, response))
+            Err(error)
         }
     }
 }

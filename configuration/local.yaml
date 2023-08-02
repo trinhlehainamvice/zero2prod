@@ -1,7 +1,7 @@
 application:
   host: 127.0.0.1
   base_url: http://127.0.0.1
-  hmac_secret: super-long-secret-string-for-testing
+  hmac_secret: j3oO2gtFn8ep8AAGHXDHSmCeYsyvX1Lz8hxDs8csSJ6w5qynXC8P6Xe4eSi0Pc+fyRpAYUcSkZJ7ajjhp6uz5Q==
 database:
   username: postgres
   password: password
