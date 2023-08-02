@@ -1,33 +1,32 @@
 use crate::authentication::HmacSecret;
+use actix_web::cookie::Cookie;
 use actix_web::http::header::ContentType;
-use actix_web::{web, HttpResponse};
+use actix_web::{web, HttpRequest, HttpResponse};
 use hmac::{Hmac, Mac};
 use secrecy::ExposeSecret;
 use sha2::Sha256;
 
 #[derive(serde::Deserialize)]
-pub struct ErrorParam {
+pub struct ErrorParams {
     // Make a param optional, mean query still passed even if this param is missing
-    error: Option<String>,
+    error: String,
     // hmac to qualify the valid error param
-    tag: Option<String>,
+    tag: String,
 }
 
-impl ErrorParam {
+impl ErrorParams {
     fn verify(self, hmac_secret: &HmacSecret) -> Result<String, anyhow::Error> {
-        let tag = self
-            .tag
-            .ok_or_else(|| anyhow::anyhow!("Missing tag query param"))?;
+        tracing::info!(
+            error = %self.error.clone(),
+            tag = %self.tag.clone(),
+        );
+
         // Decode hex string to array of bytes
         // Example: abcd1e2f -> [10, 11, 12, 13, 1, 14, 15]
-        let tag = hex::decode(tag)?;
+        let tag = hex::decode(self.tag)?;
 
-        let error = self
-            .error
-            .ok_or_else(|| anyhow::anyhow!("Missing error query param"))?;
-
-        let query_string = format!("error={}", error);
-        // Create mac hash algorithm with hmac_secret seed
+        let query_string = format!("error={}", self.error);
+        // Create mac hash algorithm with hmac_secret seed (aka private key)
         let mut mac =
             Hmac::<Sha256>::new_from_slice(hmac_secret.0.expose_secret().as_bytes()).unwrap();
         // Hash query_string
@@ -39,27 +38,35 @@ impl ErrorParam {
         // Known as XSS (Cross Site Scripting)
         // For example: https://www.example.com/search?q=<script>alert('XSS Attack!')</script>
         // Just like SQL injection, attacker injects untrusted characters into the query that lead to unexpected query execution
-        Ok(htmlescape::encode_minimal(&error))
+        Ok(htmlescape::encode_minimal(&self.error))
     }
 }
 
-pub async fn login_form(
-    web::Query(params): web::Query<ErrorParam>,
-    hmac_secret: web::Data<HmacSecret>,
-) -> HttpResponse {
-    let error_html = match params.verify(&hmac_secret) {
-        Ok(error_html) => error_html,
-        Err(error) => {
-            tracing::warn!(
-                error.message = %error,
-                error.cause_chain = ?error,
-                "Failed to verify query parameters"
-            );
-            "".to_string()
-        }
+pub async fn login_form(hmac_secret: web::Data<HmacSecret>, req: HttpRequest) -> HttpResponse {
+    let params: Option<ErrorParams> = match req.cookie("_flash") {
+        None => None,
+        Some(cookie) => match serde_json::from_str(cookie.value()) {
+            Err(_) => None,
+            Ok(params) => Some(params),
+        },
     };
 
-    HttpResponse::Ok()
+    let error_html = match params {
+        None => "".to_string(),
+        Some(params) => match params.verify(&hmac_secret) {
+            Ok(error) => format!("<p><i>{}</i></p>", error),
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    error.cause_chain = ?error,
+                    "Failed to verify error query parameters"
+                );
+                "".to_string()
+            }
+        },
+    };
+
+    let mut response = HttpResponse::Ok()
         .content_type(ContentType::html())
         .body(format!(
             r#"
@@ -90,5 +97,11 @@ pub async fn login_form(
 </form>
 </body>
 </html>"#
-        ))
+        ));
+
+    response
+        .add_removal_cookie(&Cookie::new("_flash", ""))
+        .unwrap();
+
+    response
 }

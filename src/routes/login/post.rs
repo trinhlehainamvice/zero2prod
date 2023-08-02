@@ -1,5 +1,6 @@
 use crate::authentication::{validate_credentials, AuthError, Credentials, HmacSecret};
 use crate::error_chain_fmt;
+use actix_web::cookie::Cookie;
 use actix_web::error::InternalError;
 use actix_web::{web, HttpResponse};
 use hmac::{Hmac, Mac};
@@ -61,9 +62,7 @@ pub async fn login(
                 AuthError::UnexpectedError(_) => LoginError::UnexpectedError(error.into()),
             };
 
-            let encoded_url_error = urlencoding::Encoded::new(error.to_string());
-
-            let query_string = format!("?error={}", encoded_url_error);
+            let query_string = format!("error={}", error);
 
             let hmac_tag = {
                 let mut mac = Hmac::<Sha256>::new_from_slice(
@@ -74,11 +73,14 @@ pub async fn login(
                 mac.finalize().into_bytes()
             };
 
+            let flash_message = serde_json::json!({
+                "error": error.to_string(),
+                "tag": format!("{:x}", hmac_tag)
+            });
+
             let response = HttpResponse::SeeOther()
-                .insert_header((
-                    LOCATION,
-                    format!("/login?{}&tag={:x}", query_string, hmac_tag),
-                ))
+                .insert_header((LOCATION, "/login"))
+                .cookie(Cookie::new("_flash", flash_message.to_string()))
                 .finish();
 
             Err(InternalError::from_response(error, response))

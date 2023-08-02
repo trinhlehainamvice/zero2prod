@@ -45,6 +45,19 @@ impl TestApp {
             .expect("Failed to execute request")
     }
 
+    pub async fn post_login(&self, login_form: serde_json::Value) -> reqwest::Response {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .cookie_store(true)
+            .build()
+            .unwrap()
+            .post(&format!("{}/login", self.addr))
+            .form(&login_form)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
     pub async fn create_unconfirmed_subscriber(&self, body: &str) -> ConfirmationLinks {
         // Arrange
         let _scoped_mock = Mock::given(path("/email"))
@@ -227,4 +240,9 @@ impl TestUser {
         .await
         .expect("Failed to create user to test database");
     }
+}
+
+pub fn assert_redirects_to(response: &reqwest::Response, location: &str) {
+    assert_eq!(response.status().as_u16(), 303);
+    assert_eq!(response.headers().get("location").unwrap(), location);
 }

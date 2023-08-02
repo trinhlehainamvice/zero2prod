@@ -27,6 +27,8 @@ pub struct Credentials {
     pub password: Secret<String>,
 }
 
+// Wrap data into a tuple struct to make data as unique type.
+// Avoid actix-web conflict with another Data that have same inside data.
 pub struct HmacSecret(pub Secret<String>);
 
 #[tracing::instrument(name = "Extract credentials from Request header", skip_all)]
