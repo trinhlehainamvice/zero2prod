@@ -27,20 +27,10 @@ async fn login_failed_redirects_to_login() {
     assert_eq!(flash_message["error"], "Invalid Username or Password");
 
     // Act 2
-    let location = response.headers().get("Location").unwrap();
-    let response = reqwest::Client::new()
-        .get(&format!("{}{}", app.addr, location.to_str().unwrap()))
-        .send()
-        .await
-        .expect("Failed to execute request.");
+    let login_html = app.get_login_html().await;
 
     // Assert
-    assert_eq!(response.status().as_u16(), 200);
-    assert!(response
-        .text()
-        .await
-        .expect("Failed to read response body")
-        .contains("<p><i>Invalid Username or Password</i></p>"));
+    assert!(login_html.contains(r#"<p><i>Invalid Username or Password</i></p>"#));
 }
 
 #[tokio::test]

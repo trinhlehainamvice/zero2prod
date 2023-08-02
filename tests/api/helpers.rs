@@ -14,6 +14,7 @@ use zero2prod::startup::Application;
 use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
 
 pub struct TestApp {
+    pub client: reqwest::Client,
     pub addr: String,
     pub port: u16,
     pub pg_pool: PgPool,
@@ -23,7 +24,7 @@ pub struct TestApp {
 
 impl TestApp {
     pub async fn post_subscriptions(&self, body: String) -> reqwest::Response {
-        reqwest::Client::new()
+        self.client
             .post(&format!("{}/subscriptions", self.addr))
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(body)
@@ -33,7 +34,7 @@ impl TestApp {
     }
 
     pub async fn post_newsletters(&self, body: serde_json::Value) -> reqwest::Response {
-        reqwest::Client::new()
+        self.client
             .post(&format!("{}/newsletters", self.addr))
             .json(&body)
             .basic_auth(
@@ -46,16 +47,23 @@ impl TestApp {
     }
 
     pub async fn post_login(&self, login_form: serde_json::Value) -> reqwest::Response {
-        reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .cookie_store(true)
-            .build()
-            .unwrap()
+        self.client
             .post(&format!("{}/login", self.addr))
             .form(&login_form)
             .send()
             .await
             .expect("Failed to execute request.")
+    }
+
+    pub async fn get_login_html(&self) -> String {
+        self.client
+            .get(&format!("{}/login", self.addr))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+            .text()
+            .await
+            .expect("Failed to read response body.")
     }
 
     pub async fn create_unconfirmed_subscriber(&self, body: &str) -> ConfirmationLinks {
@@ -142,7 +150,14 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
     // tokio::test manage background threads and terminate them when tests finish
     tokio::spawn(app.run_until_terminated());
 
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .cookie_store(true)
+        .build()
+        .unwrap();
+
     Ok(TestApp {
+        client,
         addr,
         port,
         pg_pool,
