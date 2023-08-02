@@ -1,11 +1,15 @@
 use crate::{error_chain_fmt, spawn_blocking_task_with_tracing};
+use actix_session::{Session, SessionExt, SessionGetError, SessionInsertError};
+use actix_web::dev::Payload;
 use actix_web::http::header::HeaderMap;
+use actix_web::{FromRequest, HttpRequest};
 use anyhow::Context;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use base64::Engine;
 use secrecy::{ExposeSecret, Secret};
 use sqlx::PgPool;
 use std::fmt::Debug;
+use std::future::{ready, Ready};
 use uuid::Uuid;
 
 #[derive(thiserror::Error)]
@@ -25,6 +29,40 @@ impl Debug for AuthError {
 pub struct Credentials {
     pub username: String,
     pub password: Secret<String>,
+}
+
+pub struct TypedSession(Session);
+
+impl TypedSession {
+    const USER_ID_KEY: &'static str = "user_id";
+
+    pub fn new(session: Session) -> Self {
+        Self(session)
+    }
+
+    pub fn renew(&self) {
+        self.0.renew();
+    }
+
+    pub fn insert_user_id(&self, user_id: Uuid) -> Result<(), SessionInsertError> {
+        self.0.insert(Self::USER_ID_KEY, user_id)
+    }
+
+    pub fn get_user_id(&self) -> Result<Option<Uuid>, SessionGetError> {
+        self.0.get(Self::USER_ID_KEY)
+    }
+}
+
+// Implement Extract for TypedSession
+impl FromRequest for TypedSession {
+    type Error = <Session as FromRequest>::Error;
+    // Request is performed in asynchronous context
+    // So we need to wrap our extracted session into a future even we don't perform any I/O process
+    type Future = Ready<Result<Self, Self::Error>>;
+
+    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
+        ready(Ok(TypedSession::new(req.get_session())))
+    }
 }
 
 #[tracing::instrument(name = "Extract credentials from Request header", skip_all)]

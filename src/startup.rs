@@ -1,6 +1,9 @@
 use crate::configuration::{DatabaseSettings, EmailClientSettings, Settings};
 use crate::email_client::EmailClient;
-use crate::routes::{check_health, home, login, login_form, publish_newsletter, subscriptions, SubscriberEmail, admin};
+use crate::routes::{
+    admin, check_health, home, login, login_form, publish_newsletter, subscriptions,
+    SubscriberEmail,
+};
 use actix_session::storage::RedisSessionStore;
 use actix_session::SessionMiddleware;
 use actix_web::cookie::Key;
@@ -34,11 +37,23 @@ impl Application {
         let email_client = Data::new(email_client);
         let app_base_url = Data::new(settings.application.base_url);
 
-        let message_key = Key::from(settings.application.flash_msg_key.expose_secret().as_bytes());
+        let message_key = Key::from(
+            settings
+                .application
+                .flash_msg_key
+                .expose_secret()
+                .as_bytes(),
+        );
         let message_store = CookieMessageStore::builder(message_key).build();
         let message_framework = FlashMessagesFramework::builder(message_store).build();
 
-        let session_key = Key::from(settings.application.redis_session_key.expose_secret().as_bytes());
+        let session_key = Key::from(
+            settings
+                .application
+                .redis_session_key
+                .expose_secret()
+                .as_bytes(),
+        );
         let session_store =
             RedisSessionStore::builder(settings.application.redis_url.expose_secret())
                 .build()

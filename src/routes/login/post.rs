@@ -1,6 +1,5 @@
-use crate::authentication::{validate_credentials, AuthError, Credentials};
+use crate::authentication::{validate_credentials, AuthError, Credentials, TypedSession};
 use crate::error_chain_fmt;
-use actix_session::Session;
 use actix_web::http::StatusCode;
 use actix_web::{web, HttpResponse, ResponseError};
 use actix_web_flash_messages::FlashMessage;
@@ -52,7 +51,7 @@ pub struct UserLoginForm {
 pub async fn login(
     web::Form(login_form): web::Form<UserLoginForm>,
     pg_pool: web::Data<PgPool>,
-    session: Session,
+    session: TypedSession,
 ) -> Result<HttpResponse, LoginError> {
     let credentials = Credentials {
         username: login_form.username,
@@ -63,8 +62,10 @@ pub async fn login(
     match validate_credentials(&pg_pool, credentials).await {
         Ok(user_id) => {
             tracing::Span::current().record("user_id", tracing::field::display(&user_id));
+
+            session.renew();
             session
-                .insert("user_id", user_id)
+                .insert_user_id(user_id)
                 .map_err(|e| LoginError::UnexpectedError(anyhow::anyhow!(e)))?;
             Ok(HttpResponse::SeeOther()
                 .insert_header((LOCATION, "/admin/dashboard"))

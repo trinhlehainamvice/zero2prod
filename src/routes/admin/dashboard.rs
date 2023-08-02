@@ -1,4 +1,4 @@
-use actix_session::Session;
+use crate::authentication::TypedSession;
 use actix_web::http::header::ContentType;
 use actix_web::{web, HttpResponse};
 use sqlx::PgPool;
@@ -12,10 +12,10 @@ where
 }
 
 pub async fn dashboard(
-    session: Session,
+    session: TypedSession,
     pg_pool: web::Data<PgPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
-    let user_id = session.get::<Uuid>("user_id").map_err(e500)?;
+    let user_id = session.get_user_id().map_err(e500)?;
 
     let username = match user_id {
         Some(id) => get_username_from_database(&pg_pool, &id)
