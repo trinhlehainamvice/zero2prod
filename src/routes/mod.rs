@@ -3,6 +3,7 @@ mod domain;
 mod home;
 mod login;
 mod newsletters;
+pub mod admin;
 pub mod subscriptions;
 
 pub use check_health::*;

@@ -1,8 +1,8 @@
 use crate::configuration::{DatabaseSettings, EmailClientSettings, Settings};
 use crate::email_client::EmailClient;
-use crate::routes::{
-    check_health, home, login, login_form, publish_newsletter, subscriptions, SubscriberEmail,
-};
+use crate::routes::{check_health, home, login, login_form, publish_newsletter, subscriptions, SubscriberEmail, admin};
+use actix_session::storage::RedisSessionStore;
+use actix_session::SessionMiddleware;
 use actix_web::cookie::Key;
 use actix_web::dev::Server;
 use actix_web::web::Data;
@@ -34,15 +34,26 @@ impl Application {
         let email_client = Data::new(email_client);
         let app_base_url = Data::new(settings.application.base_url);
 
-        let key = Key::from(settings.application.hmac_secret.expose_secret().as_bytes());
-        let message_store = CookieMessageStore::builder(key).build();
+        let message_key = Key::from(settings.application.flash_msg_key.expose_secret().as_bytes());
+        let message_store = CookieMessageStore::builder(message_key).build();
         let message_framework = FlashMessagesFramework::builder(message_store).build();
+
+        let session_key = Key::from(settings.application.redis_session_key.expose_secret().as_bytes());
+        let session_store =
+            RedisSessionStore::builder(settings.application.redis_url.expose_secret())
+                .build()
+                .await
+                .expect("Failed to build RedisSessionStore");
 
         // Actix-web runtime that have multiple threads
         let server = HttpServer::new(move || {
             App::new()
                 .wrap(TracingLogger::default()) // logger middleware
                 .wrap(message_framework.clone())
+                .wrap(SessionMiddleware::new(
+                    session_store.clone(),
+                    session_key.clone(),
+                ))
                 .route("/", web::get().to(home))
                 .route("/login", web::get().to(login_form))
                 .route("/login", web::post().to(login))
@@ -53,6 +64,7 @@ impl Application {
                     web::get().to(subscriptions::confirm),
                 )
                 .route("/newsletters", web::post().to(publish_newsletter))
+                .route("/admin/dashboard", web::get().to(admin::dashboard))
                 // Application Context, that store state of application
                 .app_data(pg_pool.clone())
                 .app_data(email_client.clone())

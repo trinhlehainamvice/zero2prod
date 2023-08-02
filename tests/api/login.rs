@@ -40,5 +40,5 @@ async fn login_successfully_redirects_to_home() {
     let response = app.post_login(login_form).await;
 
     // Assert
-    assert_redirects_to(&response, "/");
+    assert_redirects_to(&response, "/admin/dashboard");
 }

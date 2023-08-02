@@ -54,7 +54,9 @@ pub struct ApplicationSettings {
     pub base_url: String,
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub port: u16,
-    pub hmac_secret: Secret<String>,
+    pub flash_msg_key: Secret<String>,
+    pub redis_url: Secret<String>,
+    pub redis_session_key: Secret<String>,
 }
 
 impl ApplicationSettings {

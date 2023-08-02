@@ -39,6 +39,13 @@ DB_NAME="${POSTGRES_DB:=newsletter}"
 # Check if a custom port has been set, otherwise default to '5432'
 DB_PORT="${POSTGRES_PORT:=5432}"
 
+RUNNING_CONTAINER=$(docker ps --filter name=postgres --format="{{.ID}}")
+if [[ -n "$RUNNING_CONTAINER" ]]; then
+  echo >&2 "Postgres is already running. Kill it with"
+  echo >&2 "  docker kill ${RUNNING_CONTAINER}"
+  exit 1
+fi
+
 # Allow to skip Docker if a dockerized Postgres database is already running
 if [[ -z "${SKIP_DOCKER}" ]]; then
   # Launch postgres using Docker
