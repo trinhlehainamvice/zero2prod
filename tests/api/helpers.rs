@@ -32,6 +32,25 @@ impl TestApp {
             .expect("Failed to execute request")
     }
 
+    pub async fn get(&self, path: &str) -> reqwest::Response {
+        self.client
+            .get(&format!("{}{}", self.addr, path))
+            .send()
+            .await
+            .unwrap()
+    }
+
+    pub async fn get_html(&self, path: &str) -> String {
+        self.client
+            .get(&format!("{}{}", self.addr, path))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap()
+    }
+
     pub async fn post_newsletters(&self, body: serde_json::Value) -> reqwest::Response {
         self.client
             .post(&format!("{}/newsletters", self.addr))
@@ -49,6 +68,15 @@ impl TestApp {
         self.client
             .post(&format!("{}/login", self.addr))
             .form(&login_form)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_form(&self, path: &str, form: serde_json::Value) -> reqwest::Response {
+        self.client
+            .post(&format!("{}{}", self.addr, path))
+            .form(&form)
             .send()
             .await
             .expect("Failed to execute request.")

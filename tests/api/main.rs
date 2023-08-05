@@ -1,4 +1,4 @@
-mod admin_dashboard;
+mod admin;
 mod health;
 mod helpers;
 mod login;

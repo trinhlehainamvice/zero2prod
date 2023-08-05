@@ -28,10 +28,15 @@ pub async fn change_password(
     } = change_pwd_form;
 
     if new_password.expose_secret() != confirm_password.expose_secret() {
-        FlashMessage::error("Passwords don't match").send();
+        FlashMessage::error("New passwords don't match").send();
         return Ok(see_other("/admin/password"));
     }
 
+    if current_password.expose_secret() == new_password.expose_secret() {
+        FlashMessage::error("New password must be different with current password").send();
+        return Ok(see_other("/admin/password"));
+    }
+    
     let username = get_username_from_database(&pg_pool, &user_id)
         .await
         .map_err(e500)?;
@@ -40,9 +45,16 @@ pub async fn change_password(
         username,
         password: Secret::new(current_password.expose_secret().clone()),
     };
-    let user_id = validate_credentials(&pg_pool, credentials)
+    let user_id = match validate_credentials(&pg_pool, credentials)
         .await
-        .map_err(e500)?;
+        .map_err(e500)
+    {
+        Ok(user_id) => user_id,
+        Err(_) => {
+            FlashMessage::error("Wrong current password").send();
+            return Ok(see_other("/admin/password"));
+        }
+    };
 
     let new_password_hash = utils::spawn_blocking_task_with_tracing(move || {
         hash_password(new_password.expose_secret())
