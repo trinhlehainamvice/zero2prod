@@ -1,5 +1,5 @@
-use crate::authentication::{validate_credentials, AuthError, Credentials, TypedSession};
-use crate::error_chain_fmt;
+use crate::authentication::{validate_credentials, AuthError, Credentials, UserSession};
+use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{web, HttpResponse, ResponseError};
 use actix_web_flash_messages::FlashMessage;
@@ -51,7 +51,7 @@ pub struct UserLoginForm {
 pub async fn login(
     web::Form(login_form): web::Form<UserLoginForm>,
     pg_pool: web::Data<PgPool>,
-    session: TypedSession,
+    session: UserSession,
 ) -> Result<HttpResponse, LoginError> {
     let credentials = Credentials {
         username: login_form.username,

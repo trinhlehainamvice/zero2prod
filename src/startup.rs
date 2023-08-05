@@ -1,3 +1,4 @@
+use crate::authentication::reject_anonymous_users;
 use crate::configuration::{DatabaseSettings, EmailClientSettings, Settings};
 use crate::email_client::EmailClient;
 use crate::routes::{
@@ -12,6 +13,7 @@ use actix_web::web::Data;
 use actix_web::{web, App, HttpServer};
 use actix_web_flash_messages::storage::CookieMessageStore;
 use actix_web_flash_messages::FlashMessagesFramework;
+use actix_web_lab::middleware;
 use secrecy::ExposeSecret;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
@@ -79,7 +81,14 @@ impl Application {
                     web::get().to(subscriptions::confirm),
                 )
                 .route("/newsletters", web::post().to(publish_newsletter))
-                .route("/admin/dashboard", web::get().to(admin::dashboard))
+                .service(
+                    web::scope("/admin")
+                        .wrap(middleware::from_fn(reject_anonymous_users))
+                        .route("/dashboard", web::get().to(admin::dashboard))
+                        .route("/logout", web::get().to(admin::logout))
+                        .route("/password", web::get().to(admin::get::change_password))
+                        .route("/password", web::post().to(admin::post::change_password)),
+                )
                 // Application Context, that store state of application
                 .app_data(pg_pool.clone())
                 .app_data(email_client.clone())

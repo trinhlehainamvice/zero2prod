@@ -1,10 +1,12 @@
-use crate::{error_chain_fmt, spawn_blocking_task_with_tracing};
+use crate::utils::{error_chain_fmt, spawn_blocking_task_with_tracing};
 use actix_session::{Session, SessionExt, SessionGetError, SessionInsertError};
 use actix_web::dev::Payload;
 use actix_web::http::header::HeaderMap;
 use actix_web::{FromRequest, HttpRequest};
 use anyhow::Context;
-use argon2::{Argon2, PasswordHash, PasswordVerifier};
+use argon2::password_hash::rand_core::OsRng;
+use argon2::password_hash::SaltString;
+use argon2::{Algorithm, Argon2, Params, PasswordHash, PasswordHasher, PasswordVerifier, Version};
 use base64::Engine;
 use secrecy::{ExposeSecret, Secret};
 use sqlx::PgPool;
@@ -31,9 +33,9 @@ pub struct Credentials {
     pub password: Secret<String>,
 }
 
-pub struct TypedSession(Session);
+pub struct UserSession(Session);
 
-impl TypedSession {
+impl UserSession {
     const USER_ID_KEY: &'static str = "user_id";
 
     pub fn new(session: Session) -> Self {
@@ -51,17 +53,21 @@ impl TypedSession {
     pub fn get_user_id(&self) -> Result<Option<Uuid>, SessionGetError> {
         self.0.get(Self::USER_ID_KEY)
     }
+
+    pub fn logout(&self) {
+        self.0.purge();
+    }
 }
 
 // Implement Extract for TypedSession
-impl FromRequest for TypedSession {
+impl FromRequest for UserSession {
     type Error = <Session as FromRequest>::Error;
     // Request is performed in asynchronous context
     // So we need to wrap our extracted session into a future even we don't perform any I/O process
     type Future = Ready<Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
-        ready(Ok(TypedSession::new(req.get_session())))
+        ready(Ok(UserSession::new(req.get_session())))
     }
 }
 
@@ -170,4 +176,36 @@ pub fn verify_password_hash(
         .verify_password(password.expose_secret().as_bytes(), &parsed_hash)
         .context("Failed to verify password hash")
         .map_err(AuthError::InvalidCredentials)
+}
+
+pub fn hash_password(password: &str) -> Result<String, AuthError> {
+    let salt = SaltString::generate(&mut OsRng);
+    let params = Params::new(15000, 2, 1, None).expect("Fail to create Argon Params");
+    let hasher = Argon2::new(Algorithm::Argon2d, Version::V0x13, params);
+    let new_password_hash = hasher
+        .hash_password(password.as_bytes(), salt.as_salt())
+        .context("Failed to hash password")
+        .map_err(AuthError::UnexpectedError)?;
+
+    Ok(new_password_hash.to_string())
+}
+
+#[tracing::instrument(name = "Update new user's password_hash to database", skip_all)]
+pub async fn update_user_password_to_database(
+    user_id: &Uuid,
+    new_password_hash: &str,
+    pg_pool: &PgPool,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"
+        UPDATE users
+        SET password_hash = $1
+        WHERE user_id = $2
+        "#,
+        new_password_hash,
+        user_id
+    )
+    .execute(pg_pool)
+    .await?;
+    Ok(())
 }

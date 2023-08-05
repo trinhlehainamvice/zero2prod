@@ -4,9 +4,9 @@ use actix_web_flash_messages::IncomingFlashMessages;
 use std::fmt::Write;
 
 pub async fn login_form(messages: IncomingFlashMessages) -> HttpResponse {
-    let mut error = "".to_string();
+    let mut flash_msg = "".to_string();
     for msg in messages.iter() {
-        let _ = writeln!(error, "<p><i>{}</i></p>", msg.content());
+        let _ = writeln!(flash_msg, "<p><i>{}</i></p>", msg.content());
     }
 
     HttpResponse::Ok()
@@ -21,7 +21,7 @@ pub async fn login_form(messages: IncomingFlashMessages) -> HttpResponse {
 </head>
 <body>
 <form action="/login" method="POST">
-    {error}
+    {flash_msg}
     <label>Username
         <input
                 type="text"
@@ -29,6 +29,7 @@ pub async fn login_form(messages: IncomingFlashMessages) -> HttpResponse {
                 name="username"
         >
     </label>
+    <br>
     <label>Password
         <input
                 type="password"
@@ -36,9 +37,11 @@ pub async fn login_form(messages: IncomingFlashMessages) -> HttpResponse {
                 name="password"
         >
     </label>
+    <br>
     <button type="submit">Login</button>
 </form>
 </body>
-</html>"#
+</html>
+            "#
         ))
 }

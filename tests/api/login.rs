@@ -13,13 +13,13 @@ async fn login_failed_redirects_to_login() {
         "password": &password
     });
 
-    // Act 1
+    // Act 1 Send login form
     let response = app.post_login(login_form).await;
 
     // Assert
     assert_redirects_to(&response, "/login");
 
-    // Act 2
+    // Act 2 Check login html page
     let login_html = app.get_login_html().await;
 
     // Assert

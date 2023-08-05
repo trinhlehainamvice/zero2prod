@@ -1,6 +1,5 @@
 use argon2::password_hash::SaltString;
 use argon2::{Algorithm, Params, PasswordHasher, Version};
-use fake::faker::internet::en::Password;
 use fake::faker::name::en::Name;
 use fake::Fake;
 use once_cell::sync::Lazy;
@@ -230,7 +229,8 @@ impl TestUser {
         Self {
             user_id: Uuid::new_v4(),
             username: Name().fake(),
-            password: Password(8..20).fake(),
+            // password: Password(8..20).fake(),
+            password: "4ll0v3f0rR_$t".to_string(),
         }
     }
 
