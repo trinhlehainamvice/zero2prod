@@ -1,2 +1,2 @@
-mod dashboard;
 mod change_password;
+mod dashboard;

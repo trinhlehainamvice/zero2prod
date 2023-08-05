@@ -36,7 +36,7 @@ pub async fn change_password(
         FlashMessage::error("New password must be different with current password").send();
         return Ok(see_other("/admin/password"));
     }
-    
+
     let username = get_username_from_database(&pg_pool, &user_id)
         .await
         .map_err(e500)?;
