@@ -1,5 +1,3 @@
-use std::fmt::Display;
-use std::ops::Deref;
 use crate::authentication::UserSession;
 use crate::utils::{e500, see_other};
 use actix_web::body::MessageBody;
@@ -7,6 +5,8 @@ use actix_web::dev::{ServiceRequest, ServiceResponse};
 use actix_web::error::InternalError;
 use actix_web::{FromRequest, HttpMessage};
 use actix_web_lab::middleware::Next;
+use std::fmt::Display;
+use std::ops::Deref;
 use uuid::Uuid;
 
 #[derive(Copy, Clone, Debug)]
@@ -38,7 +38,7 @@ pub async fn reject_anonymous_users(
         Some(user_id) => {
             req.extensions_mut().insert(UserId(user_id));
             Ok(next.call(req).await?)
-        },
+        }
         None => {
             let response = see_other("/login");
             let error = anyhow::anyhow!("Login required");

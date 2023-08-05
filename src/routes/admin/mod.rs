@@ -1,9 +1,9 @@
-mod dashboard;
 mod change_password;
+mod dashboard;
 mod logout;
 
-pub use dashboard::*;
 pub use change_password::*;
+pub use dashboard::*;
 pub use logout::*;
 
 // TODO: add seed user (first user when deploy app)
