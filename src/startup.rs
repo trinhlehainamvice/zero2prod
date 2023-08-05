@@ -1,10 +1,7 @@
 use crate::authentication::reject_anonymous_users;
 use crate::configuration::{DatabaseSettings, EmailClientSettings, Settings};
 use crate::email_client::EmailClient;
-use crate::routes::{
-    admin, check_health, home, login, login_form, publish_newsletter, subscriptions,
-    SubscriberEmail,
-};
+use crate::routes::{admin, check_health, home, login, login_form, subscriptions, SubscriberEmail};
 use actix_session::storage::RedisSessionStore;
 use actix_session::SessionMiddleware;
 use actix_web::cookie::Key;
@@ -80,14 +77,15 @@ impl Application {
                     "/subscriptions/confirm",
                     web::get().to(subscriptions::confirm),
                 )
-                .route("/newsletters", web::post().to(publish_newsletter))
                 .service(
                     web::scope("/admin")
                         .wrap(middleware::from_fn(reject_anonymous_users))
-                        .route("/dashboard", web::get().to(admin::dashboard))
+                        .route("/dashboard", web::get().to(admin::admin_dashboard))
+                        .route("/newsletters", web::get().to(admin::get_newsletters_form))
+                        .route("/newsletters", web::post().to(admin::publish_newsletters))
                         .route("/logout", web::get().to(admin::logout))
-                        .route("/password", web::get().to(admin::get::change_password))
-                        .route("/password", web::post().to(admin::post::change_password)),
+                        .route("/password", web::get().to(admin::change_password_form))
+                        .route("/password", web::post().to(admin::change_password)),
                 )
                 // Application Context, that store state of application
                 .app_data(pg_pool.clone())

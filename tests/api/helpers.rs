@@ -51,14 +51,10 @@ impl TestApp {
             .unwrap()
     }
 
-    pub async fn post_newsletters(&self, body: serde_json::Value) -> reqwest::Response {
+    pub async fn post_newsletters(&self, body: &serde_json::Value) -> reqwest::Response {
         self.client
-            .post(&format!("{}/newsletters", self.addr))
-            .json(&body)
-            .basic_auth(
-                self.test_user.username.clone(),
-                Some(self.test_user.password.clone()),
-            )
+            .post(&format!("{}/admin/newsletters", self.addr))
+            .form(&body)
             .send()
             .await
             .expect("Failed to execute request")

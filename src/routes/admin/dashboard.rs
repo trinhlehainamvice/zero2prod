@@ -4,7 +4,7 @@ use actix_web::http::header::ContentType;
 use actix_web::{web, HttpResponse};
 use sqlx::PgPool;
 
-pub async fn dashboard(
+pub async fn admin_dashboard(
     user_id: web::ReqData<UserId>,
     pg_pool: web::Data<PgPool>,
 ) -> Result<HttpResponse, actix_web::Error> {
@@ -24,6 +24,8 @@ pub async fn dashboard(
 </head>
 <body>
 <p>Hello {}</p>
+<br>
+<a href="/admin/newsletters">Publish Newsletter</a>
 <br>
 <a href="/admin/password">Change Password</a>
 <br>
