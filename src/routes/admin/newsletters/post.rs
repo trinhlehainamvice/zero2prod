@@ -1,6 +1,10 @@
+use crate::authentication::UserId;
 use crate::email_client::EmailClient;
+use crate::idempotency::{
+    get_idempotency_response_record_from_database, insert_idempotency_response_record_into_database,
+};
 use crate::routes::SubscriberEmail;
-use crate::utils::{e500, see_other};
+use crate::utils::{e400, e500, see_other};
 use actix_web::{web, HttpResponse};
 use actix_web_flash_messages::FlashMessage;
 use anyhow::Context;
@@ -11,7 +15,7 @@ pub struct NewsletterPayload {
     title: String,
     text_content: String,
     html_content: String,
-    _idempotency_key: String,
+    idempotency_key: String,
 }
 
 struct ConfirmedSubscriber {
@@ -27,10 +31,26 @@ struct ConfirmedSubscriber {
     )
 )]
 pub async fn publish_newsletters(
-    web::Form(payload): web::Form<NewsletterPayload>,
+    web::Form(NewsletterPayload {
+        title,
+        text_content,
+        html_content,
+        idempotency_key,
+    }): web::Form<NewsletterPayload>,
     pg_pool: web::Data<PgPool>,
     email_client: web::Data<EmailClient>,
+    user_id: web::ReqData<UserId>,
 ) -> Result<HttpResponse, actix_web::Error> {
+    let idempotency_key = idempotency_key.try_into().map_err(e400)?;
+    let user_id = user_id.into_inner();
+    if let Some(saved_response) =
+        get_idempotency_response_record_from_database(&pg_pool, &idempotency_key, &user_id)
+            .await
+            .map_err(e500)?
+    {
+        return Ok(saved_response);
+    }
+
     let confirmed_subscribers = get_confirmed_subscribers(&pg_pool)
         .await
         .context("Failed to fetch confirmed subscribers.")
@@ -40,12 +60,7 @@ pub async fn publish_newsletters(
         match subscriber {
             Ok(subscriber) => {
                 email_client
-                    .send_email(
-                        &subscriber.email,
-                        &payload.title,
-                        &payload.text_content,
-                        &payload.html_content,
-                    )
+                    .send_email(&subscriber.email, &title, &text_content, &html_content)
                     .await
                     .with_context(|| format!("Failed to send newsletters to {}", subscriber.email))
                     .map_err(e500)?;
@@ -61,7 +76,16 @@ pub async fn publish_newsletters(
     }
 
     FlashMessage::success("Published newsletter successfully!").send();
-    Ok(see_other("/admin/newsletters"))
+    let response = see_other("/admin/newsletters");
+    let response = insert_idempotency_response_record_into_database(
+        &pg_pool,
+        &idempotency_key,
+        &user_id,
+        response,
+    )
+    .await
+    .map_err(e500)?;
+    Ok(response)
 }
 
 #[tracing::instrument(name = "Get confirmed subscribers", skip_all)]

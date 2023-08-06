@@ -36,6 +36,13 @@ where
     actix_web::error::ErrorInternalServerError(e)
 }
 
+pub fn e400<T>(e: T) -> actix_web::Error
+where
+    T: std::fmt::Debug + std::fmt::Display + 'static,
+{
+    actix_web::error::ErrorBadRequest(e)
+}
+
 #[tracing::instrument(name = "Get username from database with user_id", skip(pg_pool))]
 pub async fn get_username_from_database(
     pg_pool: &PgPool,

@@ -1,5 +1,7 @@
 use crate::helpers::{assert_redirects_to, spawn_app};
 use uuid::Uuid;
+use wiremock::matchers::{method, path};
+use wiremock::ResponseTemplate;
 
 #[tokio::test]
 async fn publish_newsletters_invalid_form_data_ret_400() {
@@ -137,4 +139,50 @@ async fn publish_newsletters_as_invalid_user_redirects_to_login() {
         let response = app.post_newsletters(&newsletter_body).await;
         assert_redirects_to(&response, "/login");
     }
+}
+
+#[tokio::test]
+async fn publish_duplicate_newsletters_ret_same_response() {
+    // Arrange
+    let app = spawn_app().await.unwrap();
+    let body = "name=Foo%20Bar&email=foobar%40example.com";
+
+    app.create_confirmed_subscriber(body).await;
+
+    wiremock::Mock::given(path("/email"))
+        .and(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&app.email_client)
+        .await;
+
+    let newsletter_body = serde_json::json!({
+        "title": "Newsletter title",
+        "text_content": "Newsletter body as plain text",
+        "html_content": "<p>Newsletter body as HTML</p>",
+        "idempotency_key": Uuid::new_v4().to_string()
+    });
+
+    let login_form = serde_json::json!({
+        "username": &app.test_user.username,
+        "password": &app.test_user.password
+    });
+
+    // Act 1 login
+    let response = app.post_login(login_form).await;
+    assert_redirects_to(&response, "/admin/dashboard");
+
+    // Act 2 publish newsletter
+    let response_1 = app.post_newsletters(&newsletter_body).await;
+    assert_redirects_to(&response_1, "/admin/newsletters");
+
+    // Act 3 publish newsletter **again**
+    let response_2 = app.post_newsletters(&newsletter_body).await;
+    assert_redirects_to(&response_2, "/admin/newsletters");
+
+    // Assert expect to be the same
+    assert_eq!(
+        response_1.text().await.unwrap(),
+        response_2.text().await.unwrap()
+    );
 }
