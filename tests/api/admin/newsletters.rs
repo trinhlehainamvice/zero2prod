@@ -1,4 +1,5 @@
 use crate::helpers::{assert_redirects_to, spawn_app};
+use fake::Fake;
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::ResponseTemplate;
@@ -185,4 +186,52 @@ async fn publish_duplicate_newsletters_ret_same_response() {
         response_1.text().await.unwrap(),
         response_2.text().await.unwrap()
     );
+}
+
+#[tokio::test]
+async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
+    // Arrange
+    let app = spawn_app().await.unwrap();
+    let body = "name=Foo%20Bar&email=foobar%40example.com";
+
+    app.create_confirmed_subscriber(body).await;
+
+    wiremock::Mock::given(path("/email"))
+        .and(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&app.email_client)
+        .await;
+
+    let newsletter_body = serde_json::json!({
+        "title": "Newsletter title",
+        "text_content": "Newsletter body as plain text",
+        "html_content": "<p>Newsletter body as HTML</p>",
+        "idempotency_key": Uuid::new_v4().to_string()
+    });
+
+    let login_form = serde_json::json!({
+        "username": &app.test_user.username,
+        "password": &app.test_user.password
+    });
+
+    // Act 1 login
+    let response = app.post_login(login_form).await;
+    assert_redirects_to(&response, "/admin/dashboard");
+
+    // Act 2 publish newsletters in parallel
+    let mut responses = vec![];
+    for _ in 0..(5..10).fake() {
+        responses.push(app.post_newsletters(&newsletter_body));
+    }
+
+    let responses = futures::future::join_all(responses).await;
+
+    let mut texts = vec![];
+    for response in responses {
+        texts.push(response.text().await.unwrap());
+    }
+
+    // Assert expect all responses' contents to be the same
+    assert!(texts.windows(2).all(|text| text[0] == text[1]));
 }

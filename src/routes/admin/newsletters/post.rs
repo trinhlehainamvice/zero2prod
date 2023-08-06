@@ -1,7 +1,8 @@
 use crate::authentication::UserId;
 use crate::email_client::EmailClient;
 use crate::idempotency::{
-    get_idempotency_response_record_from_database, insert_idempotency_response_record_into_database,
+    try_insert_idempotency_response_record_into_database, update_idempotency_response_record,
+    ProcessState,
 };
 use crate::routes::SubscriberEmail;
 use crate::utils::{e400, e500, see_other};
@@ -43,13 +44,19 @@ pub async fn publish_newsletters(
 ) -> Result<HttpResponse, actix_web::Error> {
     let idempotency_key = idempotency_key.try_into().map_err(e400)?;
     let user_id = user_id.into_inner();
-    if let Some(saved_response) =
-        get_idempotency_response_record_from_database(&pg_pool, &idempotency_key, &user_id)
-            .await
-            .map_err(e500)?
+    let transaction = pg_pool.begin().await.map_err(e500)?;
+
+    let mut transaction = match try_insert_idempotency_response_record_into_database(
+        transaction,
+        &idempotency_key,
+        &user_id,
+    )
+    .await
+    .map_err(e500)?
     {
-        return Ok(saved_response);
-    }
+        ProcessState::Completed(response) => return Ok(response),
+        ProcessState::StartProcessing(transaction) => transaction,
+    };
 
     let confirmed_subscribers = get_confirmed_subscribers(&pg_pool)
         .await
@@ -77,14 +84,11 @@ pub async fn publish_newsletters(
 
     FlashMessage::success("Published newsletter successfully!").send();
     let response = see_other("/admin/newsletters");
-    let response = insert_idempotency_response_record_into_database(
-        &pg_pool,
-        &idempotency_key,
-        &user_id,
-        response,
-    )
-    .await
-    .map_err(e500)?;
+    let response =
+        update_idempotency_response_record(&mut transaction, &idempotency_key, &user_id, response)
+            .await
+            .map_err(e500)?;
+    transaction.commit().await.map_err(e500)?;
     Ok(response)
 }
 
