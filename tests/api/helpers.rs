@@ -1,5 +1,6 @@
 use argon2::password_hash::SaltString;
 use argon2::{Algorithm, Params, PasswordHasher, Version};
+use fake::faker::internet::en::SafeEmail;
 use fake::faker::name::en::Name;
 use fake::Fake;
 use once_cell::sync::Lazy;
@@ -22,6 +23,14 @@ pub struct TestApp {
 }
 
 impl TestApp {
+    pub async fn login(&self) -> reqwest::Response {
+        self.post_login(serde_json::json!({
+            "username": &self.test_user.username,
+            "password": &self.test_user.password
+        }))
+        .await
+    }
+
     pub async fn post_subscriptions(&self, body: String) -> reqwest::Response {
         self.client
             .post(&format!("{}/subscriptions", self.addr))
@@ -100,7 +109,10 @@ impl TestApp {
 
         // Act
         self.post_subscriptions(body.into()).await;
-        let email_request = &self.email_client.received_requests().await.unwrap()[0];
+        // Because Mock Server Instance stack ups all incoming requests
+        let requests = self.email_client.received_requests().await.unwrap();
+        // Need to get the last request in received_requests (latest one) from Mock Server
+        let email_request = requests.last().unwrap();
 
         ConfirmationLinks::get_confirmation_link(email_request)
 
@@ -114,7 +126,9 @@ impl TestApp {
         link.set_port(Some(self.port)).unwrap();
 
         // Act
-        reqwest::get(link)
+        reqwest::Client::new()
+            .get(link)
+            .send()
             .await
             .unwrap()
             .error_for_status()
@@ -284,4 +298,16 @@ impl TestUser {
 pub fn assert_redirects_to(response: &reqwest::Response, location: &str) {
     assert_eq!(response.status().as_u16(), 303);
     assert_eq!(response.headers().get("location").unwrap(), location);
+}
+
+pub async fn create_confirmed_subscriber(app: &TestApp) {
+    let name: String = Name().fake();
+    let email: String = SafeEmail().fake();
+    let body = serde_urlencoded::to_string(serde_json::json!({
+        "name": name,
+        "email": email
+    }))
+    .expect("Failed to subscriber json form to urlencoded");
+
+    app.create_confirmed_subscriber(&body).await;
 }

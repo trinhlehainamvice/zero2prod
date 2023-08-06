@@ -9,7 +9,7 @@ use crate::utils::{e400, e500, see_other};
 use actix_web::{web, HttpResponse};
 use actix_web_flash_messages::FlashMessage;
 use anyhow::Context;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 
 #[derive(serde::Deserialize)]
 pub struct NewsletterPayload {
@@ -58,7 +58,7 @@ pub async fn publish_newsletters(
         ProcessState::StartProcessing(transaction) => transaction,
     };
 
-    let confirmed_subscribers = get_confirmed_subscribers(&pg_pool)
+    let confirmed_subscribers = get_confirmed_subscribers(&mut transaction)
         .await
         .context("Failed to fetch confirmed subscribers.")
         .map_err(e500)?;
@@ -94,7 +94,7 @@ pub async fn publish_newsletters(
 
 #[tracing::instrument(name = "Get confirmed subscribers", skip_all)]
 async fn get_confirmed_subscribers(
-    pg_pool: &PgPool,
+    transaction: &mut Transaction<'_, Postgres>,
 ) -> Result<Vec<Result<ConfirmedSubscriber, anyhow::Error>>, anyhow::Error> {
     struct Row {
         email: String,
@@ -108,7 +108,7 @@ async fn get_confirmed_subscribers(
         WHERE status = 'confirmed'
         "#,
     )
-    .fetch_all(pg_pool)
+    .fetch_all(transaction)
     .await?
     .into_iter()
     // Parse confirmed email from the database again

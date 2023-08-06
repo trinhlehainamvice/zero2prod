@@ -1,4 +1,4 @@
-use crate::helpers::{assert_redirects_to, spawn_app};
+use crate::helpers::{assert_redirects_to, create_confirmed_subscriber, spawn_app};
 use fake::Fake;
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
@@ -8,17 +8,10 @@ use wiremock::ResponseTemplate;
 async fn publish_newsletters_invalid_form_data_ret_400() {
     // Arrange
     let app = spawn_app().await.unwrap();
-    let body = "name=Foo%20Bar&email=foobar%40example.com";
-
-    app.create_confirmed_subscriber(body).await;
-
-    let login_form = serde_json::json!({
-        "username": &app.test_user.username,
-        "password": &app.test_user.password
-    });
+    create_confirmed_subscriber(&app).await;
 
     // Act 1 login
-    let response = app.post_login(login_form).await;
+    let response = app.login().await;
     assert_redirects_to(&response, "/admin/dashboard");
 
     let idempotency_key = Uuid::new_v4().to_string();
@@ -71,16 +64,10 @@ async fn publish_newsletters_without_login_redirects_to_login() {
 async fn publish_newsletters_as_valid_user_redirects_to_newsletters_with_success_message() {
     // Arrange
     let app = spawn_app().await.unwrap();
-    let body = "name=Foo%20Bar&email=foobar%40example.com";
-
-    app.create_confirmed_subscriber(body).await;
+    create_confirmed_subscriber(&app).await;
 
     // Act 1 login
-    let login_form = serde_json::json!({
-        "username": &app.test_user.username,
-        "password": &app.test_user.password
-    });
-    let response = app.post_login(login_form).await;
+    let response = app.login().await;
     assert_redirects_to(&response, "/admin/dashboard");
 
     let idempotency_key = Uuid::new_v4().to_string();
@@ -146,9 +133,8 @@ async fn publish_newsletters_as_invalid_user_redirects_to_login() {
 async fn publish_duplicate_newsletters_ret_same_response() {
     // Arrange
     let app = spawn_app().await.unwrap();
-    let body = "name=Foo%20Bar&email=foobar%40example.com";
 
-    app.create_confirmed_subscriber(body).await;
+    create_confirmed_subscriber(&app).await;
 
     wiremock::Mock::given(path("/email"))
         .and(method("POST"))
@@ -164,13 +150,8 @@ async fn publish_duplicate_newsletters_ret_same_response() {
         "idempotency_key": Uuid::new_v4().to_string()
     });
 
-    let login_form = serde_json::json!({
-        "username": &app.test_user.username,
-        "password": &app.test_user.password
-    });
-
     // Act 1 login
-    let response = app.post_login(login_form).await;
+    let response = app.login().await;
     assert_redirects_to(&response, "/admin/dashboard");
 
     // Act 2 publish newsletter
@@ -192,9 +173,7 @@ async fn publish_duplicate_newsletters_ret_same_response() {
 async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
     // Arrange
     let app = spawn_app().await.unwrap();
-    let body = "name=Foo%20Bar&email=foobar%40example.com";
-
-    app.create_confirmed_subscriber(body).await;
+    create_confirmed_subscriber(&app).await;
 
     wiremock::Mock::given(path("/email"))
         .and(method("POST"))
@@ -210,13 +189,8 @@ async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
         "idempotency_key": Uuid::new_v4().to_string()
     });
 
-    let login_form = serde_json::json!({
-        "username": &app.test_user.username,
-        "password": &app.test_user.password
-    });
-
     // Act 1 login
-    let response = app.post_login(login_form).await;
+    let response = app.login().await;
     assert_redirects_to(&response, "/admin/dashboard");
 
     // Act 2 publish newsletters in parallel
@@ -234,4 +208,57 @@ async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
 
     // Assert expect all responses' contents to be the same
     assert!(texts.windows(2).all(|text| text[0] == text[1]));
+}
+
+#[tokio::test]
+async fn failed_to_send_newsletters_to_all_subscribers() {
+    // Arrange
+    let app = spawn_app().await.unwrap();
+
+    // Act 1 login
+    app.login().await;
+
+    create_confirmed_subscriber(&app).await;
+    create_confirmed_subscriber(&app).await;
+
+    // Notify newsletters successfully send to first subscriber
+    wiremock::Mock::given(path("/email"))
+        .and(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        // Mock server receives 1 request and drop
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&app.email_client)
+        .await;
+    // Then fail to send newsletters to second subscriber
+    wiremock::Mock::given(path("/email"))
+        .and(method("POST"))
+        .respond_with(ResponseTemplate::new(500))
+        // Mock server receives 1 request and drop
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&app.email_client)
+        .await;
+
+    let newsletter_body = serde_json::json!({
+        "title": "Newsletter title",
+        "text_content": "Newsletter body as plain text",
+        "html_content": "<p>Newsletter body as HTML</p>",
+        "idempotency_key": Uuid::new_v4().to_string()
+    });
+
+    // Act 2 publish newsletters expect to fail because of error when sending newsletter to second subscriber's email
+    let response = app.post_newsletters(&newsletter_body).await;
+    assert_eq!(response.status().as_u16(), 500);
+
+    // Act 3 retry publish newsletters expect to success to send newsletter to only one subscriber's email
+    wiremock::Mock::given(path("/email"))
+        .and(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&app.email_client)
+        .await;
+
+    let response = app.post_newsletters(&newsletter_body).await;
+    assert_redirects_to(&response, "/admin/newsletters");
 }

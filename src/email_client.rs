@@ -59,7 +59,9 @@ impl EmailClient {
             )
             .json(&request_body)
             .send()
-            .await?;
+            .await?
+            // Extract error code from response if any and convert to reqwest::Error
+            .error_for_status()?;
 
         Ok(())
     }
