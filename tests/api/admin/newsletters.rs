@@ -140,7 +140,7 @@ async fn publish_duplicate_newsletters_ret_same_response() {
         .and(method("POST"))
         .respond_with(ResponseTemplate::new(200))
         .expect(1)
-        .mount(&app.email_client)
+        .mount(&app.email_server)
         .await;
 
     let newsletter_body = serde_json::json!({
@@ -167,6 +167,10 @@ async fn publish_duplicate_newsletters_ret_same_response() {
         response_1.text().await.unwrap(),
         response_2.text().await.unwrap()
     );
+
+    app.send_remaining_emails()
+        .await
+        .expect("Failed to send newsletters to subscriber emails");
 }
 
 #[tokio::test]
@@ -179,7 +183,7 @@ async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
         .and(method("POST"))
         .respond_with(ResponseTemplate::new(200))
         .expect(1)
-        .mount(&app.email_client)
+        .mount(&app.email_server)
         .await;
 
     let newsletter_body = serde_json::json!({
@@ -200,6 +204,9 @@ async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
     }
 
     let responses = futures::future::join_all(responses).await;
+    app.send_remaining_emails()
+        .await
+        .expect("failed to send emails");
 
     let mut texts = vec![];
     for response in responses {
@@ -211,7 +218,7 @@ async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
 }
 
 #[tokio::test]
-async fn failed_to_send_newsletters_to_all_subscribers() {
+async fn forward_recovery_send_emails_when_user_post_newsletter() {
     // Arrange
     let app = spawn_app().await.unwrap();
 
@@ -228,7 +235,7 @@ async fn failed_to_send_newsletters_to_all_subscribers() {
         // Mock server receives 1 request and drop
         .up_to_n_times(1)
         .expect(1)
-        .mount(&app.email_client)
+        .mount(&app.email_server)
         .await;
     // Then fail to send newsletters to second subscriber
     wiremock::Mock::given(path("/email"))
@@ -237,7 +244,7 @@ async fn failed_to_send_newsletters_to_all_subscribers() {
         // Mock server receives 1 request and drop
         .up_to_n_times(1)
         .expect(1)
-        .mount(&app.email_client)
+        .mount(&app.email_server)
         .await;
 
     let newsletter_body = serde_json::json!({
@@ -247,18 +254,25 @@ async fn failed_to_send_newsletters_to_all_subscribers() {
         "idempotency_key": Uuid::new_v4().to_string()
     });
 
-    // Act 2 publish newsletters expect to fail because of error when sending newsletter to second subscriber's email
+    // Act 2 publish newsletters expect to success when trigger issue
+    // Even if server failed
     let response = app.post_newsletters(&newsletter_body).await;
-    assert_eq!(response.status().as_u16(), 500);
+    assert_redirects_to(&response, "/admin/newsletters");
+    if let Err(e) = app.send_remaining_emails().await {
+        assert!(e.to_string().contains("500 Internal Server Error"));
+    }
 
     // Act 3 retry publish newsletters expect to success to send newsletter to only one subscriber's email
     wiremock::Mock::given(path("/email"))
         .and(method("POST"))
         .respond_with(ResponseTemplate::new(200))
         .expect(1)
-        .mount(&app.email_client)
+        .mount(&app.email_server)
         .await;
 
     let response = app.post_newsletters(&newsletter_body).await;
     assert_redirects_to(&response, "/admin/newsletters");
+    app.send_remaining_emails()
+        .await
+        .expect("Failed to send remaining emails");
 }

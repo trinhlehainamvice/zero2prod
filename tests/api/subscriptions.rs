@@ -11,7 +11,7 @@ async fn post_subscribe_in_urlencoded_valid_format_ret_200() {
         .and(method("POST"))
         .respond_with(ResponseTemplate::new(200))
         .expect(1)
-        .mount(&app.email_client)
+        .mount(&app.email_server)
         .await;
 
     // Act
@@ -69,7 +69,7 @@ async fn query_pending_confirmation_subscriber_after_user_send_subscription_form
         .and(method("POST"))
         .respond_with(ResponseTemplate::new(200))
         .expect(1)
-        .mount(&app.email_client)
+        .mount(&app.email_server)
         .await;
 
     // Act
@@ -99,14 +99,14 @@ async fn send_confirmation_to_subscriber_email_with_link_return_200() {
         .and(method("POST"))
         .respond_with(ResponseTemplate::new(200))
         .expect(1)
-        .mount(&app.email_client)
+        .mount(&app.email_server)
         .await;
 
     // Act
     let body = "name=Foo%20Bar&email=foobar%40example.com";
     let response = app.post_subscriptions(body.into()).await;
 
-    let email_request = &app.email_client.received_requests().await.unwrap()[0];
+    let email_request = &app.email_server.received_requests().await.unwrap()[0];
     let confirmation_links = ConfirmationLinks::get_confirmation_link(&email_request);
     let html_link = confirmation_links.html;
     let text_link = confirmation_links.plain_text;
@@ -126,7 +126,7 @@ async fn click_confirmation_link_in_email_and_query_subscriber_status_as_confirm
         .and(method("POST"))
         .respond_with(ResponseTemplate::new(200))
         .expect(1)
-        .mount(&app.email_client)
+        .mount(&app.email_server)
         .await;
     let body = "name=Foo%20Bar&email=foobar%40example.com";
 
@@ -147,7 +147,7 @@ async fn click_confirmation_link_in_email_and_query_subscriber_status_as_confirm
     assert_eq!("pending_confirmation", saved.status);
 
     // Arrange
-    let email_request = &app.email_client.received_requests().await.unwrap()[0];
+    let email_request = &app.email_server.received_requests().await.unwrap()[0];
     let confirmation_links = ConfirmationLinks::get_confirmation_link(email_request);
     let mut confirmation_link = reqwest::Url::parse(&confirmation_links.html).unwrap();
     confirmation_link.set_port(Some(app.port)).unwrap();

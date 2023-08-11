@@ -10,7 +10,9 @@ use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 use zero2prod::configuration::{DatabaseSettings, Settings};
-use zero2prod::startup::Application;
+use zero2prod::email_client::EmailClient;
+use zero2prod::newsletters_issues::{try_execute_task, ExecutionResult};
+use zero2prod::startup::{get_email_client, Application};
 use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
 
 pub struct TestApp {
@@ -18,11 +20,22 @@ pub struct TestApp {
     pub addr: String,
     pub port: u16,
     pub pg_pool: PgPool,
-    pub email_client: MockServer,
+    pub email_server: MockServer,
+    pub email_client: EmailClient,
     pub test_user: TestUser,
 }
 
 impl TestApp {
+    pub async fn send_remaining_emails(&self) -> anyhow::Result<()> {
+        loop {
+            if let ExecutionResult::EmptyQueue =
+                try_execute_task(&self.pg_pool, &self.email_client).await?
+            {
+                return Ok(());
+            }
+        }
+    }
+
     pub async fn login(&self) -> reqwest::Response {
         self.post_login(serde_json::json!({
             "username": &self.test_user.username,
@@ -104,13 +117,13 @@ impl TestApp {
             .and(method("POST"))
             .respond_with(ResponseTemplate::new(200))
             .expect(1)
-            .mount_as_scoped(&self.email_client)
+            .mount_as_scoped(&self.email_server)
             .await;
 
         // Act
         self.post_subscriptions(body.into()).await;
         // Because Mock Server Instance stack ups all incoming requests
-        let requests = self.email_client.received_requests().await.unwrap();
+        let requests = self.email_server.received_requests().await.unwrap();
         // Need to get the last request in received_requests (latest one) from Mock Server
         let email_request = requests.last().unwrap();
 
@@ -159,7 +172,7 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
     // once_cell make sure it is only run once on entire program lifetime
     Lazy::force(&TRACING);
 
-    let email_client = MockServer::start().await;
+    let email_server = MockServer::start().await;
 
     let settings = {
         let mut settings = Settings::get_configuration().expect("Failed to read configuration");
@@ -167,12 +180,13 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
         // Use port 0 to ask the OS to pick a random free port
         settings.application.port = 0;
         // Use mock server to as email server for testing
-        settings.email_client.api_base_url = email_client.uri();
+        settings.email_client.api_base_url = email_server.uri();
         settings
     };
 
+    let email_client = get_email_client(&settings.email_client);
     let pg_pool = get_test_database(&settings.database).await;
-    let app = Application::build(pg_pool.clone(), settings)
+    let app = Application::build(pg_pool.clone(), &settings)
         .await
         .expect("Failed to build Server");
 
@@ -198,6 +212,7 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
         addr,
         port,
         pg_pool,
+        email_server,
         email_client,
         test_user,
     })
