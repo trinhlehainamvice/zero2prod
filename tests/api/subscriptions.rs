@@ -52,6 +52,13 @@ async fn test_200_success_connect_to_database_and_subscribe_valid_data_in_urlenc
     let app = spawn_app().await.unwrap();
     let body = "name=Foo%20Bar&email=foobar%40example.com";
 
+    Mock::given(path("/email"))
+        .and(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&app.email_server)
+        .await;
+
     // Act
     let response = app.post_subscriptions(body.into()).await;
 

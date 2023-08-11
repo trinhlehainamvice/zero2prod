@@ -221,3 +221,10 @@ async fn get_issue(pg_pool: &PgPool, id: uuid::Uuid) -> Result<NewslettersIssue,
     .await?;
     Ok(result)
 }
+
+// TODO: e.g. adding a n_retries and
+// execute_after columns to keep track of how many attempts have already taken place and how long
+// we should wait before trying again. Try implementing it as an exercise
+
+// TODO: there is no expiry mechanism for our idempotency keys. Try designing
+// one as an exercise, using what we learned on background workers as a reference.
