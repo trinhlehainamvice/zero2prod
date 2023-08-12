@@ -16,8 +16,7 @@ async fn main() -> std::io::Result<()> {
     let notify = Arc::new(Notify::new());
 
     let app = tokio::spawn(
-        Application::builder(settings.clone())
-            .set_notify(notify.clone())
+        Application::builder(settings.clone(), notify.clone())
             .build()
             .await?
             .run_until_terminated(),

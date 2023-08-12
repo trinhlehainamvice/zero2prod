@@ -21,26 +21,21 @@ use tracing_actix_web::TracingLogger;
 
 pub struct ApplicationBuilder {
     settings: Settings,
+    notify: Arc<Notify>,
     pg_pool: Option<PgPool>,
-    notify: Option<Arc<Notify>>,
 }
 
 impl ApplicationBuilder {
-    fn new(settings: Settings) -> Self {
+    fn new(settings: Settings, notify: Arc<Notify>) -> Self {
         Self {
             settings,
+            notify,
             pg_pool: None,
-            notify: None,
         }
     }
 
     pub fn set_pg_pool(mut self, pg_pool: PgPool) -> Self {
         self.pg_pool = Some(pg_pool);
-        self
-    }
-
-    pub fn set_notify(mut self, notify: Arc<Notify>) -> Self {
-        self.notify = Some(notify);
         self
     }
 
@@ -82,24 +77,7 @@ impl ApplicationBuilder {
                 .await
                 .expect("Failed to build RedisSessionStore");
 
-        let notify = self.notify.map(Data::from);
-
-        let build_admin_service = move || {
-            let mut service = web::scope("/admin")
-                .wrap(middleware::from_fn(reject_anonymous_users))
-                .route("/dashboard", web::get().to(admin::admin_dashboard))
-                .route("/newsletters", web::get().to(admin::get_newsletters_form))
-                .route("/newsletters", web::post().to(admin::publish_newsletters))
-                .route("/logout", web::get().to(admin::logout))
-                .route("/password", web::get().to(admin::change_password_form))
-                .route("/password", web::post().to(admin::change_password));
-
-            if let Some(notify) = notify.clone() {
-                service = service.app_data(notify);
-            }
-
-            service
-        };
+        let notify = Data::from(self.notify);
 
         // Actix-web runtime that have multiple threads
         let server = HttpServer::new(move || {
@@ -119,7 +97,17 @@ impl ApplicationBuilder {
                     "/subscriptions/confirm",
                     web::get().to(subscriptions::confirm),
                 )
-                .service(build_admin_service())
+                .service(
+                    web::scope("/admin")
+                        .wrap(middleware::from_fn(reject_anonymous_users))
+                        .route("/dashboard", web::get().to(admin::admin_dashboard))
+                        .route("/newsletters", web::get().to(admin::get_newsletters_form))
+                        .route("/newsletters", web::post().to(admin::publish_newsletters))
+                        .route("/logout", web::get().to(admin::logout))
+                        .route("/password", web::get().to(admin::change_password_form))
+                        .route("/password", web::post().to(admin::change_password))
+                        .app_data(notify.clone()),
+                )
                 // Application Context, that store state of application
                 .app_data(pg_pool.clone())
                 .app_data(email_client.clone())
@@ -138,8 +126,8 @@ pub struct Application {
 }
 
 impl Application {
-    pub fn builder(settings: Settings) -> ApplicationBuilder {
-        ApplicationBuilder::new(settings)
+    pub fn builder(settings: Settings, notify: Arc<Notify>) -> ApplicationBuilder {
+        ApplicationBuilder::new(settings, notify)
     }
 
     pub fn port(&self) -> u16 {

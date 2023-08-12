@@ -1,6 +1,4 @@
-use crate::helpers::{
-    assert_redirects_to, create_confirmed_subscriber, spawn_app, spawn_app_with_worker,
-};
+use crate::helpers::{assert_redirects_to, create_confirmed_subscriber, spawn_app};
 use fake::faker::lorem::en::{Paragraph, Sentence};
 use fake::Fake;
 use std::time::Duration;
@@ -224,7 +222,7 @@ async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
 #[tokio::test(flavor = "multi_thread")]
 async fn forward_recovery_send_emails_when_user_post_newsletter() {
     // Arrange
-    let app = spawn_app_with_worker().await.unwrap();
+    let app = spawn_app().await.unwrap();
 
     // Act 1 login
     app.login().await;
@@ -276,13 +274,13 @@ async fn forward_recovery_send_emails_when_user_post_newsletter() {
 
     // Newsletters Issue Delivery Worker will wait about 1 secs when failed to dequeue issue task and send email
     // Need to wait more than 1 secs to make sure Worker is back to process
-    let _ = tokio::time::timeout(Duration::from_millis(1100), mock.wait_until_satisfied()).await;
+    let _ = tokio::time::timeout(Duration::from_secs(2), mock.wait_until_satisfied()).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn publish_multiple_newsletters_as_admin() {
     // Arrange
-    let app = spawn_app_with_worker().await.unwrap();
+    let app = spawn_app().await.unwrap();
     app.login().await;
 
     let n_subscribers: u64 = (5..10).fake();

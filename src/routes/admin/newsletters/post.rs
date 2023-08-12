@@ -35,7 +35,7 @@ pub async fn publish_newsletters(
     }): web::Form<NewsletterForm>,
     pg_pool: web::Data<PgPool>,
     user_id: web::ReqData<UserId>,
-    notify: Option<web::Data<Notify>>,
+    notify: web::Data<Notify>,
 ) -> Result<HttpResponse, actix_web::Error> {
     let idempotency_key = idempotency_key.try_into().map_err(e400)?;
     let user_id = user_id.into_inner();
@@ -77,9 +77,6 @@ pub async fn publish_newsletters(
             .await
             .map_err(e500)?;
     transaction.commit().await.map_err(e500)?;
-    // TODO: may remove option later
-    if let Some(notify) = notify {
-        notify.notify_one();
-    }
+    notify.notify_one();
     Ok(response)
 }
