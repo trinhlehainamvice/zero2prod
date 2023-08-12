@@ -6,12 +6,14 @@ use fake::Fake;
 use once_cell::sync::Lazy;
 use rand::rngs::OsRng;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
+use std::sync::Arc;
+use tokio::sync::Notify;
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 use zero2prod::configuration::{DatabaseSettings, Settings};
 use zero2prod::email_client::EmailClient;
-use zero2prod::newsletters_issues::{try_execute_task, ExecutionResult};
+use zero2prod::newsletters_issues::{build_worker, try_execute_task, ExecutionResult};
 use zero2prod::startup::{get_email_client, Application};
 use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
 
@@ -208,6 +210,67 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
         .cookie_store(true)
         .build()
         .unwrap();
+
+    Ok(TestApp {
+        client,
+        addr,
+        port,
+        pg_pool,
+        email_server,
+        email_client,
+        test_user,
+    })
+}
+
+pub async fn spawn_app_with_worker() -> std::io::Result<TestApp> {
+    // Lazy mean only run when it is called
+    // once_cell make sure it is only run once on entire program lifetime
+    Lazy::force(&TRACING);
+
+    let email_server = MockServer::start().await;
+
+    let settings = {
+        let mut settings = Settings::get_configuration().expect("Failed to read configuration");
+
+        // Use port 0 to ask the OS to pick a random free port
+        settings.application.port = 0;
+        // Use mock server to as email server for testing
+        settings.email_client.api_base_url = email_server.uri();
+        settings
+    };
+
+    let email_client = get_email_client(settings.email_client.clone());
+    let pg_pool = get_test_database(&settings.database).await;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .cookie_store(true)
+        .build()
+        .unwrap();
+
+    let test_user = TestUser::generate();
+    test_user.create_user(&pg_pool).await;
+
+    let notify = Arc::new(Notify::new());
+    let app = Application::builder(settings.clone())
+        .set_pg_pool(pg_pool.clone())
+        .set_notify(notify.clone())
+        .build()
+        .await
+        .expect("Failed to build Server");
+
+    let port = app.port();
+    let addr = format!("http://127.0.0.1:{}", port);
+
+    // tokio spawn background thread an run app
+    // We want to hold thread instance until tests finish (or end of tokio::test)
+    // tokio::test manage background threads and terminate them when tests finish
+    tokio::spawn(app.run_until_terminated());
+    tokio::spawn(
+        build_worker(settings, notify)
+            .set_pg_pool(pg_pool.clone())
+            .run_worker_until_stopped(),
+    );
 
     Ok(TestApp {
         client,

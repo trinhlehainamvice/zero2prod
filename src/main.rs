@@ -1,7 +1,9 @@
 use std::fmt::{Debug, Display};
+use std::sync::Arc;
+use tokio::sync::Notify;
 use tokio::task::JoinError;
 use zero2prod::configuration::Settings;
-use zero2prod::newsletters_issues::run_worker_until_stopped;
+use zero2prod::newsletters_issues::build_worker;
 use zero2prod::startup::Application;
 use zero2prod::telemetry::config_tracing;
 
@@ -11,14 +13,18 @@ async fn main() -> std::io::Result<()> {
 
     config_tracing(&settings.application);
 
+    let notify = Arc::new(Notify::new());
+
     let app = tokio::spawn(
         Application::builder(settings.clone())
+            .set_notify(notify.clone())
             .build()
             .await?
             .run_until_terminated(),
     );
     // Spawn a background worker to handle the newsletters issue process in parallel
-    let newsletters_issue_worker = tokio::spawn(run_worker_until_stopped(settings));
+    let newsletters_issue_worker =
+        tokio::spawn(build_worker(settings, notify).run_worker_until_stopped());
 
     tokio::select! {
         o = app => report_exit("API", o),

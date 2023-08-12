@@ -15,11 +15,14 @@ use secrecy::ExposeSecret;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::net::TcpListener;
+use std::sync::Arc;
+use tokio::sync::Notify;
 use tracing_actix_web::TracingLogger;
 
 pub struct ApplicationBuilder {
     settings: Settings,
     pg_pool: Option<PgPool>,
+    notify: Option<Arc<Notify>>,
 }
 
 impl ApplicationBuilder {
@@ -27,11 +30,17 @@ impl ApplicationBuilder {
         Self {
             settings,
             pg_pool: None,
+            notify: None,
         }
     }
 
     pub fn set_pg_pool(mut self, pg_pool: PgPool) -> Self {
         self.pg_pool = Some(pg_pool);
+        self
+    }
+
+    pub fn set_notify(mut self, notify: Arc<Notify>) -> Self {
+        self.notify = Some(notify);
         self
     }
 
@@ -73,6 +82,25 @@ impl ApplicationBuilder {
                 .await
                 .expect("Failed to build RedisSessionStore");
 
+        let notify = self.notify.map(Data::from);
+
+        let build_admin_service = move || {
+            let mut service = web::scope("/admin")
+                .wrap(middleware::from_fn(reject_anonymous_users))
+                .route("/dashboard", web::get().to(admin::admin_dashboard))
+                .route("/newsletters", web::get().to(admin::get_newsletters_form))
+                .route("/newsletters", web::post().to(admin::publish_newsletters))
+                .route("/logout", web::get().to(admin::logout))
+                .route("/password", web::get().to(admin::change_password_form))
+                .route("/password", web::post().to(admin::change_password));
+
+            if let Some(notify) = notify.clone() {
+                service = service.app_data(notify);
+            }
+
+            service
+        };
+
         // Actix-web runtime that have multiple threads
         let server = HttpServer::new(move || {
             App::new()
@@ -91,16 +119,7 @@ impl ApplicationBuilder {
                     "/subscriptions/confirm",
                     web::get().to(subscriptions::confirm),
                 )
-                .service(
-                    web::scope("/admin")
-                        .wrap(middleware::from_fn(reject_anonymous_users))
-                        .route("/dashboard", web::get().to(admin::admin_dashboard))
-                        .route("/newsletters", web::get().to(admin::get_newsletters_form))
-                        .route("/newsletters", web::post().to(admin::publish_newsletters))
-                        .route("/logout", web::get().to(admin::logout))
-                        .route("/password", web::get().to(admin::change_password_form))
-                        .route("/password", web::post().to(admin::change_password)),
-                )
+                .service(build_admin_service())
                 // Application Context, that store state of application
                 .app_data(pg_pool.clone())
                 .app_data(email_client.clone())

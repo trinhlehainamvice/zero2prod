@@ -1,5 +1,9 @@
-use crate::helpers::{assert_redirects_to, create_confirmed_subscriber, spawn_app};
+use crate::helpers::{
+    assert_redirects_to, create_confirmed_subscriber, spawn_app, spawn_app_with_worker,
+};
+use fake::faker::lorem::en::{Paragraph, Sentence};
 use fake::Fake;
+use std::time::Duration;
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::ResponseTemplate;
@@ -217,10 +221,10 @@ async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
     assert!(texts.windows(2).all(|text| text[0] == text[1]));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn forward_recovery_send_emails_when_user_post_newsletter() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = spawn_app_with_worker().await.unwrap();
 
     // Act 1 login
     app.login().await;
@@ -258,21 +262,58 @@ async fn forward_recovery_send_emails_when_user_post_newsletter() {
     // Even if server failed
     let response = app.post_newsletters(&newsletter_body).await;
     assert_redirects_to(&response, "/admin/newsletters");
-    if let Err(e) = app.send_remaining_emails().await {
-        assert!(e.to_string().contains("500 Internal Server Error"));
-    }
 
     // Act 3 retry publish newsletters expect to success to send newsletter to only one subscriber's email
-    wiremock::Mock::given(path("/email"))
+    let mock = wiremock::Mock::given(path("/email"))
         .and(method("POST"))
         .respond_with(ResponseTemplate::new(200))
         .expect(1)
-        .mount(&app.email_server)
+        .mount_as_scoped(&app.email_server)
         .await;
 
     let response = app.post_newsletters(&newsletter_body).await;
     assert_redirects_to(&response, "/admin/newsletters");
-    app.send_remaining_emails()
-        .await
-        .expect("Failed to send remaining emails");
+
+    // Newsletters Issue Delivery Worker will wait about 1 secs when failed to dequeue issue task and send email
+    // Need to wait more than 1 secs to make sure Worker is back to process
+    let _ = tokio::time::timeout(Duration::from_millis(1100), mock.wait_until_satisfied()).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn publish_multiple_newsletters_as_admin() {
+    // Arrange
+    let app = spawn_app_with_worker().await.unwrap();
+    app.login().await;
+
+    let n_subscribers: u64 = (5..10).fake();
+    for _ in 0..n_subscribers {
+        create_confirmed_subscriber(&app).await;
+    }
+
+    let n_publish: u64 = (5..10).fake();
+
+    let n_expected_requests = n_publish * n_subscribers;
+
+    let mock = wiremock::Mock::given(path("/email"))
+        .and(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(n_expected_requests)
+        .mount_as_scoped(&app.email_server)
+        .await;
+
+    for _ in 0..n_publish {
+        let title: String = Sentence(10..20).fake();
+        let text: String = Paragraph(50..100).fake();
+        let html: String = format!("<p>{}</p>", &text);
+        let newsletter_body = serde_json::json!({
+            "title": title,
+            "text_content": text,
+            "html_content": html,
+            "idempotency_key": Uuid::new_v4().to_string()
+        });
+        let response = app.post_newsletters(&newsletter_body).await;
+        assert_redirects_to(&response, "/admin/newsletters");
+    }
+
+    let _ = tokio::time::timeout(Duration::from_secs(1), mock.wait_until_satisfied()).await;
 }

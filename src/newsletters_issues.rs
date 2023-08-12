@@ -3,19 +3,47 @@ use crate::email_client::EmailClient;
 use crate::routes::SubscriberEmail;
 use crate::startup::{get_email_client, get_pg_pool};
 use sqlx::PgPool;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Notify;
 
-pub async fn run_worker_until_stopped(settings: Settings) -> Result<(), std::io::Error> {
-    let pg_pool = get_pg_pool(&settings.database);
-    let email_client = get_email_client(settings.email_client.clone());
-    worker_loop(pg_pool, email_client).await;
-    Ok(())
+pub struct NewslettersIssuesDeliveryWorker {
+    settings: Settings,
+    notify: Arc<Notify>,
+    pg_pool: Option<PgPool>,
 }
 
-async fn worker_loop(pg_pool: PgPool, email_client: EmailClient) {
+impl NewslettersIssuesDeliveryWorker {
+    pub fn set_pg_pool(mut self, pg_pool: PgPool) -> Self {
+        self.pg_pool = Some(pg_pool);
+        self
+    }
+
+    pub async fn run_worker_until_stopped(self) -> Result<(), std::io::Error> {
+        let pg_pool = match self.pg_pool {
+            Some(pg_pool) => pg_pool,
+            None => get_pg_pool(&self.settings.database),
+        };
+        let email_client = get_email_client(self.settings.email_client.clone());
+        worker_loop(pg_pool, email_client, self.notify).await;
+        Ok(())
+    }
+}
+
+pub fn build_worker(settings: Settings, notify: Arc<Notify>) -> NewslettersIssuesDeliveryWorker {
+    NewslettersIssuesDeliveryWorker {
+        settings,
+        notify,
+        pg_pool: None,
+    }
+}
+
+async fn worker_loop(pg_pool: PgPool, email_client: EmailClient, notify: Arc<Notify>) {
     loop {
         match try_execute_task(&pg_pool, &email_client).await {
-            Ok(ExecutionResult::EmptyQueue) => tokio::time::sleep(Duration::from_secs(10)).await,
+            Ok(ExecutionResult::EmptyQueue) => notify.notified().await,
+            // Sleep for a while to improve future chances of success
+            // Reference: https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
             Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
             Ok(ExecutionResult::TaskCompleted) => {}
         }
@@ -231,6 +259,3 @@ async fn get_issue(pg_pool: &PgPool, id: uuid::Uuid) -> Result<NewslettersIssue,
 
 // TODO: add newsletters issues status(processing, published, failed) column to the database
 // dequeue task depend on newsletters issues status, no need to query newsletters issue content every time dequeue a task
-
-// TODO: add thread waker, put issue worker thread to sleep if there is no work to do
-// then when a user publish a newsletter issue, issue worker thread will be waken up
