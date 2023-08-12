@@ -7,7 +7,7 @@ use std::time::Duration;
 
 pub async fn run_worker_until_stopped(settings: Settings) -> Result<(), std::io::Error> {
     let pg_pool = get_pg_pool(&settings.database);
-    let email_client = get_email_client(&settings.email_client);
+    let email_client = get_email_client(settings.email_client.clone());
     worker_loop(pg_pool, email_client).await;
     Ok(())
 }
@@ -228,3 +228,9 @@ async fn get_issue(pg_pool: &PgPool, id: uuid::Uuid) -> Result<NewslettersIssue,
 
 // TODO: there is no expiry mechanism for our idempotency keys. Try designing
 // one as an exercise, using what we learned on background workers as a reference.
+
+// TODO: add newsletters issues status(processing, published, failed) column to the database
+// dequeue task depend on newsletters issues status, no need to query newsletters issue content every time dequeue a task
+
+// TODO: add thread waker, put issue worker thread to sleep if there is no work to do
+// then when a user publish a newsletter issue, issue worker thread will be waken up

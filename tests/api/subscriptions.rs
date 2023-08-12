@@ -114,7 +114,7 @@ async fn send_confirmation_to_subscriber_email_with_link_return_200() {
     let response = app.post_subscriptions(body.into()).await;
 
     let email_request = &app.email_server.received_requests().await.unwrap()[0];
-    let confirmation_links = ConfirmationLinks::get_confirmation_link(&email_request);
+    let confirmation_links = ConfirmationLinks::get_confirmation_link(email_request);
     let html_link = confirmation_links.html;
     let text_link = confirmation_links.plain_text;
 

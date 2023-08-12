@@ -1,6 +1,8 @@
 use crate::routes::SubscriberEmail;
 use secrecy::{ExposeSecret, Secret};
 
+// This api app use Email service provider to send email
+// So this app is a client of Email service
 pub struct EmailClient {
     http_client: reqwest::Client,
     api_base_url: String,

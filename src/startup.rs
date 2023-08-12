@@ -17,27 +17,41 @@ use sqlx::PgPool;
 use std::net::TcpListener;
 use tracing_actix_web::TracingLogger;
 
-pub struct Application {
-    port: u16,
-    server: Server,
+pub struct ApplicationBuilder {
+    settings: Settings,
+    pg_pool: Option<PgPool>,
 }
 
-impl Application {
-    pub async fn build(pg_pool: PgPool, settings: &Settings) -> Result<Self, std::io::Error> {
-        let listener =
-            TcpListener::bind(settings.application.get_url()).expect("Failed to bind address");
+impl ApplicationBuilder {
+    fn new(settings: Settings) -> Self {
+        Self {
+            settings,
+            pg_pool: None,
+        }
+    }
+
+    pub fn set_pg_pool(mut self, pg_pool: PgPool) -> Self {
+        self.pg_pool = Some(pg_pool);
+        self
+    }
+
+    pub async fn build(self) -> Result<Application, std::io::Error> {
+        let listener = TcpListener::bind(self.settings.application.get_url())?;
 
         let port = listener.local_addr().unwrap().port();
 
-        let email_client = get_email_client(&settings.email_client);
+        let email_client = get_email_client(self.settings.email_client.clone());
         // So to share data between threads, actix-web provide web::Data<T>(Arc<T>)
         // which is a thread-safe reference counting pointer to a value of type T
-        let pg_pool = Data::new(pg_pool);
+        let pg_pool = Data::new(match self.pg_pool {
+            Some(pool) => pool,
+            None => get_pg_pool(&self.settings.database),
+        });
         let email_client = Data::new(email_client);
-        let app_base_url = Data::new(settings.application.base_url.clone());
+        let app_base_url = Data::new(self.settings.application.base_url.clone());
 
         let message_key = Key::from(
-            settings
+            self.settings
                 .application
                 .flash_msg_key
                 .expose_secret()
@@ -47,14 +61,14 @@ impl Application {
         let message_framework = FlashMessagesFramework::builder(message_store).build();
 
         let session_key = Key::from(
-            settings
+            self.settings
                 .application
                 .redis_session_key
                 .expose_secret()
                 .as_bytes(),
         );
         let session_store =
-            RedisSessionStore::builder(settings.application.redis_url.expose_secret())
+            RedisSessionStore::builder(self.settings.application.redis_url.expose_secret())
                 .build()
                 .await
                 .expect("Failed to build RedisSessionStore");
@@ -95,7 +109,18 @@ impl Application {
         .listen(listener)?
         .run();
 
-        Ok(Self { server, port })
+        Ok(Application { server, port })
+    }
+}
+
+pub struct Application {
+    port: u16,
+    server: Server,
+}
+
+impl Application {
+    pub fn builder(settings: Settings) -> ApplicationBuilder {
+        ApplicationBuilder::new(settings)
     }
 
     pub fn port(&self) -> u16 {
@@ -119,13 +144,13 @@ pub fn get_pg_pool(database_config: &DatabaseSettings) -> PgPool {
         .connect_lazy_with(database_config.get_pg_database_options())
 }
 
-pub fn get_email_client(email_client_config: &EmailClientSettings) -> EmailClient {
+pub fn get_email_client(email_client_config: EmailClientSettings) -> EmailClient {
     EmailClient::new(
-        email_client_config.api_base_url.clone(),
-        SubscriberEmail::parse(email_client_config.sender_email.clone())
+        email_client_config.api_base_url,
+        SubscriberEmail::parse(email_client_config.sender_email)
             .expect("Failed to parse sender email"),
-        email_client_config.auth_header.clone(),
-        email_client_config.auth_token.clone(),
+        email_client_config.auth_header,
+        email_client_config.auth_token,
         email_client_config.request_timeout_millis,
     )
 }

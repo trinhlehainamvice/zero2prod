@@ -6,7 +6,7 @@ const APP_ENV_STATE: &str = "APP_ENV_STATE";
 const LOCAL: &str = "local";
 const PRODUCTION: &str = "production";
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Clone)]
 pub struct Settings {
     pub application: ApplicationSettings,
     pub database: DatabaseSettings,
@@ -46,7 +46,7 @@ impl Settings {
     }
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Clone)]
 pub struct ApplicationSettings {
     pub name: String,
     pub rust_log: String,
@@ -65,7 +65,7 @@ impl ApplicationSettings {
     }
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Clone)]
 pub struct EmailClientSettings {
     pub api_base_url: String,
     pub sender_email: String,
@@ -75,7 +75,7 @@ pub struct EmailClientSettings {
     pub request_timeout_millis: u64,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Clone)]
 pub struct DatabaseSettings {
     pub engine: String,
     pub username: String,

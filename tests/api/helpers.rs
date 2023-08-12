@@ -184,9 +184,11 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
         settings
     };
 
-    let email_client = get_email_client(&settings.email_client);
+    let email_client = get_email_client(settings.email_client.clone());
     let pg_pool = get_test_database(&settings.database).await;
-    let app = Application::build(pg_pool.clone(), &settings)
+    let app = Application::builder(settings)
+        .set_pg_pool(pg_pool.clone())
+        .build()
         .await
         .expect("Failed to build Server");
 

@@ -2,7 +2,7 @@ use std::fmt::{Debug, Display};
 use tokio::task::JoinError;
 use zero2prod::configuration::Settings;
 use zero2prod::newsletters_issues::run_worker_until_stopped;
-use zero2prod::startup::{get_pg_pool, Application};
+use zero2prod::startup::Application;
 use zero2prod::telemetry::config_tracing;
 
 #[tokio::main]
@@ -11,9 +11,9 @@ async fn main() -> std::io::Result<()> {
 
     config_tracing(&settings.application);
 
-    let pg_pool = get_pg_pool(&settings.database);
     let app = tokio::spawn(
-        Application::build(pg_pool, &settings)
+        Application::builder(settings.clone())
+            .build()
             .await?
             .run_until_terminated(),
     );
