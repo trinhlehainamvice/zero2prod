@@ -1,3 +1,4 @@
+use crate::routes::SubscriptionStatus;
 use actix_web::{web, HttpResponse, Responder};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -102,9 +103,10 @@ async fn update_subscriber_status_to_confirmed(
     sqlx::query!(
         r#"
         UPDATE subscriptions
-        SET status = 'confirmed'
-        WHERE id = $1
+        SET status = $1
+        WHERE id = $2
         "#,
+        SubscriptionStatus::Confirmed.as_ref(),
         subscription_id
     )
     .execute(pg_pool)

@@ -73,6 +73,7 @@ impl FromRequest for UserSession {
 
 #[tracing::instrument(name = "Extract credentials from Request header", skip_all)]
 pub fn get_credentials_from_basic_auth(header: &HeaderMap) -> Result<Credentials, anyhow::Error> {
+    // Basic Authorization Template: "Authorization:Basic <base64encoded_string_segments>"
     // Get the `Authorization` header with valid UTF8 string
     let header_value = header
         .get("Authorization")

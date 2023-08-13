@@ -1,6 +1,6 @@
 use crate::configuration::Settings;
 use crate::email_client::EmailClient;
-use crate::routes::SubscriberEmail;
+use crate::routes::{SubscriberEmail, SubscriptionStatus};
 use crate::startup::{get_email_client, get_pg_pool};
 use sqlx::postgres::types::PgInterval;
 use sqlx::PgPool;
@@ -185,9 +185,10 @@ pub async fn enqueue_task(
         r#"
         INSERT INTO newsletters_issues_delivery_queue (id, subscriber_email)
         SELECT $1,
-        email FROM subscriptions WHERE status = 'confirmed'
+        email FROM subscriptions WHERE status = $2
         "#,
-        newsletters_issue_id
+        newsletters_issue_id,
+        SubscriptionStatus::Confirmed.as_ref()
     )
     .execute(transaction)
     .await?;

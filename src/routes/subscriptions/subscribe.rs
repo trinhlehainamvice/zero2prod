@@ -1,5 +1,5 @@
 use crate::email_client::EmailClient;
-use crate::routes::domain::{NewSubscriber, SubscriberEmail, SubscriberName};
+use crate::routes::domain::{NewSubscriber, SubscriberEmail, SubscriberName, SubscriptionStatus};
 use crate::utils::error_chain_fmt;
 use actix_web::{web, HttpResponse, ResponseError};
 use anyhow::Context;
@@ -121,12 +121,13 @@ async fn insert_pending_subscriber(
     sqlx::query!(
         r#"
         INSERT INTO subscriptions (id, email, name, subscribed_at, status)
-        VALUES ($1, $2, $3, $4, 'pending_confirmation')
+        VALUES ($1, $2, $3, $4, $5)
         "#,
         id,
         subscriber.email.as_ref(),
         subscriber.name.as_ref(),
-        Utc::now()
+        Utc::now(),
+        SubscriptionStatus::Pending.as_ref()
     )
     .execute(transaction)
     .await?;
