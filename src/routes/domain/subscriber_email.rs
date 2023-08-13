@@ -30,13 +30,6 @@ impl AsMut<str> for SubscriberEmail {
     }
 }
 
-impl TryInto<String> for SubscriberEmail {
-    type Error = String;
-    fn try_into(self) -> Result<String, Self::Error> {
-        Ok(self.0)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::routes::SubscriberEmail;

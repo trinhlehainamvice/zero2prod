@@ -41,6 +41,7 @@ htmlescape = "0.3"
 # hmac = { version = "0.12", features = ["std"] }
 # sha2 = "0.10"
 # hex = "0.4"
+strum = { version = "0.25", features = ["derive"]}
 
 [dependencies.sqlx]
 version = "0.6"

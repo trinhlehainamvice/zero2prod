@@ -115,19 +115,23 @@ pub async fn try_insert_idempotency_response_record_into_database(
     }
 }
 
+#[tracing::instrument(name = "Update idempotency response record into database", skip_all)]
 pub async fn update_idempotency_response_record(
     transaction: &mut Transaction<'_, Postgres>,
     idempotency_key: &IdempotencyKey,
     user_id: &uuid::Uuid,
     response: HttpResponse,
 ) -> Result<HttpResponse, anyhow::Error> {
-    // HttpResponse can't be clone, so we split it parts and combine them back into HttpResponse later
-    // After we done processing that need data from its parts
-    let (response_headers, body) = response.into_parts();
-    let status_code: i16 = response_headers.status().as_u16().try_into()?;
+    // HttpResponse can't be clone, so split it into parts and gather back the parts before return
+    // HttpResponse<B> with B is type of body
+    // into_parts() split into 2 parts HttpResponse<()>, BoxBody
+    // HttpResponse<()> mean no body (or body type is ())
+    // -> [response_without_body(headers, error, extensions), , response_body]
+    let (response_without_body, body) = response.into_parts();
+    let status_code: i16 = response_without_body.status().as_u16().try_into()?;
     let headers = {
-        let mut headers = Vec::with_capacity(response_headers.headers().len());
-        for (key, value) in response_headers.headers().iter() {
+        let mut headers = Vec::with_capacity(response_without_body.headers().len());
+        for (key, value) in response_without_body.headers().iter() {
             let key = key.as_str().to_owned();
             let value = value.as_bytes().to_owned();
             headers.push(ResponseHeaderRecord { key, value });
@@ -155,6 +159,6 @@ pub async fn update_idempotency_response_record(
     .execute(transaction)
     .await?;
 
-    let response = response_headers.set_body(body).map_into_boxed_body();
+    let response = response_without_body.set_body(body).map_into_boxed_body();
     Ok(response)
 }
