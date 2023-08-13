@@ -57,6 +57,7 @@ pub struct ApplicationSettings {
     pub flash_msg_key: Secret<String>,
     pub redis_url: Secret<String>,
     pub redis_session_key: Secret<String>,
+    pub idempotency_expiration_millis: u64,
 }
 
 impl ApplicationSettings {

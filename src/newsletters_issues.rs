@@ -2,6 +2,7 @@ use crate::configuration::Settings;
 use crate::email_client::EmailClient;
 use crate::routes::SubscriberEmail;
 use crate::startup::{get_email_client, get_pg_pool};
+use sqlx::postgres::types::PgInterval;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,27 +15,26 @@ pub struct NewslettersIssuesDeliveryWorker {
 }
 
 impl NewslettersIssuesDeliveryWorker {
+    pub fn builder(settings: Settings, notify: Arc<Notify>) -> Self {
+        Self {
+            settings,
+            notify,
+            pg_pool: None,
+        }
+    }
+
     pub fn set_pg_pool(mut self, pg_pool: PgPool) -> Self {
         self.pg_pool = Some(pg_pool);
         self
     }
 
-    pub async fn run_worker_until_stopped(self) -> Result<(), std::io::Error> {
-        let pg_pool = match self.pg_pool {
-            Some(pg_pool) => pg_pool,
-            None => get_pg_pool(&self.settings.database),
-        };
+    pub async fn run_until_terminated(self) -> Result<(), std::io::Error> {
+        let pg_pool = self
+            .pg_pool
+            .unwrap_or_else(|| get_pg_pool(&self.settings.database));
         let email_client = get_email_client(self.settings.email_client.clone());
         worker_loop(pg_pool, email_client, self.notify).await;
         Ok(())
-    }
-}
-
-pub fn build_worker(settings: Settings, notify: Arc<Notify>) -> NewslettersIssuesDeliveryWorker {
-    NewslettersIssuesDeliveryWorker {
-        settings,
-        notify,
-        pg_pool: None,
     }
 }
 
@@ -250,12 +250,75 @@ async fn get_issue(pg_pool: &PgPool, id: uuid::Uuid) -> Result<NewslettersIssue,
     Ok(result)
 }
 
+pub struct DeleteExpiredIdempotencyWorker {
+    settings: Settings,
+    pg_pool: Option<PgPool>,
+}
+
+impl DeleteExpiredIdempotencyWorker {
+    pub fn builder(settings: Settings) -> Self {
+        Self {
+            settings,
+            pg_pool: None,
+        }
+    }
+
+    pub fn set_pg_pool(mut self, pg_pool: PgPool) -> Self {
+        self.pg_pool = Some(pg_pool);
+        self
+    }
+
+    pub async fn run_until_terminated(self) -> Result<(), std::io::Error> {
+        let expiration_time_millis: Duration =
+            Duration::from_millis(self.settings.application.idempotency_expiration_millis);
+        let pg_pool = self
+            .pg_pool
+            .unwrap_or_else(|| get_pg_pool(&self.settings.database));
+        remove_expired_idempotency_worker_loop(pg_pool, expiration_time_millis).await;
+        Ok(())
+    }
+}
+
+async fn remove_expired_idempotency_worker_loop(pg_pool: PgPool, expired_time_millis: Duration) {
+    loop {
+        match delete_expired_idempotency_keys(&pg_pool, expired_time_millis).await {
+            Ok(_) => tokio::time::sleep(expired_time_millis).await,
+            Err(e) => {
+                tracing::error!(
+                    error.cause_chain = ?e,
+                    error.message = %e,
+                    "Failed to delete expired idempotency keys"
+                );
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+    }
+}
+
+#[tracing::instrument(
+    name = "Delete expired idempotency keys in database",
+    skip(pg_pool, expired_time)
+)]
+async fn delete_expired_idempotency_keys(
+    pg_pool: &PgPool,
+    expired_time: Duration,
+) -> Result<(), anyhow::Error> {
+    let expired_time = PgInterval::try_from(expired_time).map_err(|e| anyhow::anyhow!(e))?;
+    sqlx::query!(
+        r#"
+        DELETE FROM idempotency
+        WHERE now() - created_at > $1
+        "#,
+        expired_time
+    )
+    .execute(pg_pool)
+    .await?;
+    Ok(())
+}
+
 // TODO: e.g. adding a n_retries and
 // execute_after columns to keep track of how many attempts have already taken place and how long
 // we should wait before trying again. Try implementing it as an exercise
-
-// TODO: there is no expiry mechanism for our idempotency keys. Try designing
-// one as an exercise, using what we learned on background workers as a reference.
 
 // TODO: add newsletters issues status(processing, published, failed) column to the database
 // dequeue task depend on newsletters issues status, no need to query newsletters issue content every time dequeue a task

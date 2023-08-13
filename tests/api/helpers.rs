@@ -13,7 +13,10 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 use zero2prod::configuration::{DatabaseSettings, Settings};
 use zero2prod::email_client::EmailClient;
-use zero2prod::newsletters_issues::{build_worker, try_execute_task, ExecutionResult};
+use zero2prod::newsletters_issues::{
+    try_execute_task, DeleteExpiredIdempotencyWorker, ExecutionResult,
+    NewslettersIssuesDeliveryWorker,
+};
 use zero2prod::startup::{get_email_client, Application};
 use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
 
@@ -206,9 +209,14 @@ pub async fn spawn_app() -> std::io::Result<TestApp> {
     // tokio::test manage background threads and terminate them when tests finish
     tokio::spawn(app.run_until_terminated());
     tokio::spawn(
-        build_worker(settings, notify)
+        NewslettersIssuesDeliveryWorker::builder(settings.clone(), notify)
             .set_pg_pool(pg_pool.clone())
-            .run_worker_until_stopped(),
+            .run_until_terminated(),
+    );
+    tokio::spawn(
+        DeleteExpiredIdempotencyWorker::builder(settings)
+            .set_pg_pool(pg_pool.clone())
+            .run_until_terminated(),
     );
 
     let client = reqwest::Client::builder()

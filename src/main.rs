@@ -3,7 +3,9 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 use tokio::task::JoinError;
 use zero2prod::configuration::Settings;
-use zero2prod::newsletters_issues::build_worker;
+use zero2prod::newsletters_issues::{
+    DeleteExpiredIdempotencyWorker, NewslettersIssuesDeliveryWorker,
+};
 use zero2prod::startup::Application;
 use zero2prod::telemetry::config_tracing;
 
@@ -21,13 +23,18 @@ async fn main() -> std::io::Result<()> {
             .await?
             .run_until_terminated(),
     );
-    // Spawn a background worker to handle the newsletters issue process in parallel
-    let newsletters_issue_worker =
-        tokio::spawn(build_worker(settings, notify).run_worker_until_stopped());
+
+    let newsletters_issue_worker = tokio::spawn(
+        NewslettersIssuesDeliveryWorker::builder(settings.clone(), notify).run_until_terminated(),
+    );
+
+    let delete_expired_idempotency_worker =
+        tokio::spawn(DeleteExpiredIdempotencyWorker::builder(settings).run_until_terminated());
 
     tokio::select! {
         o = app => report_exit("API", o),
         o = newsletters_issue_worker => report_exit("Newsletter Issue Delivery Worker", o),
+        o = delete_expired_idempotency_worker => report_exit("Delete Expired Idempotency Worker", o),
     }
 
     Ok(())

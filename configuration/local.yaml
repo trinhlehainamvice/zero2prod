@@ -5,6 +5,7 @@ application:
   flash_msg_key: j3oO2gtFn8ep8AAGHXDHSmCeYsyvX1Lz8hxDs8csSJ6w5qynXC8P6Xe4eSi0Pc+fyRpAYUcSkZJ7ajjhp6uz5Q==
   redis_url: redis://127.0.0.1:6379
   redis_session_key: j3oO2gtFn8ep8AAGHXDHSmCeYsyvX1Lz8hxDs8csSJ6w5qynXC8P6Xe4eSi0Pc+fyRpAYUcSkZJ7ajjhp6uz5Q==
+  idempotency_expiration_millis: 100
 database:
   username: postgres
   password: password

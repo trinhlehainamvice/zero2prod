@@ -315,3 +315,72 @@ async fn publish_multiple_newsletters_as_admin() {
 
     let _ = tokio::time::timeout(Duration::from_secs(1), mock.wait_until_satisfied()).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn idempotency_expired_and_republish_newsletter() {
+    // Arrange
+    let app = spawn_app().await.unwrap();
+
+    app.login().await;
+
+    create_confirmed_subscriber(&app).await;
+    create_confirmed_subscriber(&app).await;
+
+    wiremock::Mock::given(path("/email"))
+        .and(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        // Limit number of requests this Matcher can handle
+        // Then free to another Matcher to handle
+        .up_to_n_times(2)
+        .expect(2)
+        .mount(&app.email_server)
+        .await;
+
+    let newsletter_body = serde_json::json!({
+        "title": "Newsletter title",
+        "text_content": "Newsletter body as plain text",
+        "html_content": "<p>Newsletter body as HTML</p>",
+        "idempotency_key": Uuid::new_v4().to_string()
+    });
+
+    // Act 1 publish newsletters
+    let response = app.post_newsletters(&newsletter_body).await;
+    assert_redirects_to(&response, "/admin/newsletters");
+
+    // Act 2 wait until idempotency is expired, then check idempotency key is deleted in database
+    // idempotency_expiration_millis is set to 100 in local (test) settings
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let result = sqlx::query!(
+        r#"
+        SELECT user_id FROM idempotency WHERE idempotency_key = $1
+        "#,
+        newsletter_body
+            .get("idempotency_key")
+            .unwrap()
+            .as_str()
+            .unwrap()
+    )
+    .fetch_optional(&app.pg_pool)
+    .await
+    .expect("Failed to fetch idempotency");
+
+    assert!(result.is_none());
+
+    // Act 3 republish newsletters after idempotency is expired and deleted
+    let mock_guard = wiremock::Mock::given(path("/email"))
+        .and(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(2)
+        .mount_as_scoped(&app.email_server)
+        .await;
+
+    let response = app.post_newsletters(&newsletter_body).await;
+    assert_redirects_to(&response, "/admin/newsletters");
+
+    let _ = tokio::time::timeout(
+        Duration::from_millis(200),
+        mock_guard.wait_until_satisfied(),
+    )
+    .await;
+}
