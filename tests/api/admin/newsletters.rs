@@ -175,7 +175,7 @@ async fn publish_duplicate_newsletters_ret_same_response() {
         .expect("Failed to send newsletters to subscriber emails");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
     // Arrange
     let app = spawn_app().await.unwrap();
@@ -278,7 +278,7 @@ async fn forward_recovery_send_emails_when_user_post_newsletter() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn publish_multiple_newsletters_as_admin() {
+async fn publish_multiple_newsletters() {
     // Arrange
     let app = spawn_app().await.unwrap();
     app.login().await;
@@ -348,8 +348,8 @@ async fn idempotency_expired_and_republish_newsletter() {
     assert_redirects_to(&response, "/admin/newsletters");
 
     // Act 2 wait until idempotency is expired, then check idempotency key is deleted in database
-    // idempotency_expiration_millis is set to 100 in local (test) settings
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // idempotency_expiration_millis is set to 500 in local (test) settings
+    tokio::time::sleep(Duration::from_millis(700)).await;
 
     let result = sqlx::query!(
         r#"
