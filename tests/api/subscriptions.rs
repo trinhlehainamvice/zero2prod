@@ -1,11 +1,11 @@
-use crate::helpers::{spawn_app, ConfirmationLinks};
+use crate::helpers::{ConfirmationLinks, TestApp};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, ResponseTemplate};
 
 #[tokio::test]
 async fn post_subscribe_in_urlencoded_valid_format_ret_200() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
 
     Mock::given(path("/email"))
         .and(method("POST"))
@@ -25,7 +25,7 @@ async fn post_subscribe_in_urlencoded_valid_format_ret_200() {
 #[tokio::test]
 async fn test_400_fail_post_subscribe_in_urlencoded_format_when_missing_data() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     let test_cases = vec![
         ("email=foobar%40example.com", "Missing the name"),
         ("name=Foo%20Bar", "Missing the email"),
@@ -49,7 +49,7 @@ async fn test_400_fail_post_subscribe_in_urlencoded_format_when_missing_data() {
 #[tokio::test]
 async fn test_200_success_connect_to_database_and_subscribe_valid_data_in_urlencoded_format() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     let body = "name=Foo%20Bar&email=foobar%40example.com";
 
     Mock::given(path("/email"))
@@ -69,7 +69,7 @@ async fn test_200_success_connect_to_database_and_subscribe_valid_data_in_urlenc
 #[tokio::test]
 async fn query_pending_confirmation_subscriber_after_user_send_subscription_form_ret_200() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     let body = "name=Foo%20Bar&email=foobar%40example.com";
 
     Mock::given(path("/email"))
@@ -100,7 +100,7 @@ async fn query_pending_confirmation_subscriber_after_user_send_subscription_form
 #[tokio::test]
 async fn send_confirmation_to_subscriber_email_with_link_return_200() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
 
     Mock::given(path("/email"))
         .and(method("POST"))
@@ -128,7 +128,7 @@ async fn send_confirmation_to_subscriber_email_with_link_return_200() {
 #[tokio::test]
 async fn click_confirmation_link_in_email_and_query_subscriber_status_as_confirmed_ret_200() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     Mock::given(path("/email"))
         .and(method("POST"))
         .respond_with(ResponseTemplate::new(200))
@@ -180,7 +180,7 @@ async fn click_confirmation_link_in_email_and_query_subscriber_status_as_confirm
 #[tokio::test]
 async fn internal_query_error_ret_500() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     let body = "name=Foo%20Bar&email=foobar%40example.com";
 
     sqlx::query!(

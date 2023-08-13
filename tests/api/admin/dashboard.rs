@@ -1,9 +1,9 @@
-use crate::helpers::{assert_redirects_to, spawn_app};
+use crate::helpers::{assert_redirects_to, TestApp};
 
 #[tokio::test]
 async fn invalid_credentials_redirects_to_login() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     let login_form = serde_json::json!({
         "username": &app.test_user.username,
         "password": "invalid_password"
@@ -23,7 +23,7 @@ async fn invalid_credentials_redirects_to_login() {
 #[tokio::test]
 async fn admin_dashboard_is_accessible_when_logged_in() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     let login_form = serde_json::json!({
         "username": &app.test_user.username,
         "password": &app.test_user.password
@@ -41,7 +41,7 @@ async fn admin_dashboard_is_accessible_when_logged_in() {
 #[tokio::test]
 async fn clink_on_change_password_link_in_admin_dashboard_html() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     let login_form = serde_json::json!({
         "username": &app.test_user.username,
         "password": &app.test_user.password
@@ -62,7 +62,7 @@ async fn clink_on_change_password_link_in_admin_dashboard_html() {
 #[tokio::test]
 async fn click_on_logout_link_in_admin_dashboard_redirects_to_login() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     let login_form = serde_json::json!({
         "username": &app.test_user.username,
         "password": &app.test_user.password

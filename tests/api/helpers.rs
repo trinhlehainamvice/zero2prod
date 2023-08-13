@@ -154,6 +154,110 @@ impl TestApp {
     }
 }
 
+impl TestApp {
+    pub fn builder() -> TestAppBuilder {
+        TestAppBuilder::default()
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct TestAppBuilder {
+    spawn_newsletters_issues_delivery_worker: bool,
+    spawn_delete_expired_idempotency_worker: bool,
+    idempotency_expiration_time_millis: Option<u64>,
+}
+
+impl TestAppBuilder {
+    pub fn spawn_newsletters_issues_delivery_worker(mut self) -> Self {
+        self.spawn_newsletters_issues_delivery_worker = true;
+        self
+    }
+
+    pub fn spawn_delete_expired_idempotency_worker(mut self) -> Self {
+        self.spawn_delete_expired_idempotency_worker = true;
+        self
+    }
+
+    pub fn idempotency_expiration_time_millis(mut self, time_millis: u64) -> Self {
+        self.idempotency_expiration_time_millis = Some(time_millis);
+        self
+    }
+
+    pub async fn build(self) -> std::io::Result<TestApp> {
+        // Lazy mean only run when it is called
+        // once_cell make sure it is only run once on entire program lifetime
+        Lazy::force(&TRACING);
+
+        let email_server = MockServer::start().await;
+
+        let settings = {
+            let mut settings = Settings::get_configuration().expect("Failed to read configuration");
+
+            // Use port 0 to ask the OS to pick a random free port
+            settings.application.port = 0;
+            // Use mock server to as email server for testing
+            settings.email_client.api_base_url = email_server.uri();
+
+            if let Some(time_millis) = self.idempotency_expiration_time_millis {
+                settings.application.idempotency_expiration_millis = time_millis;
+            }
+
+            settings
+        };
+
+        let notify = Arc::new(Notify::new());
+        let email_client = get_email_client(settings.email_client.clone());
+        let pg_pool = get_test_database(&settings.database).await;
+        let app = Application::builder(settings.clone(), notify.clone())
+            .set_pg_pool(pg_pool.clone())
+            .build()
+            .await
+            .expect("Failed to build Server");
+
+        let port = app.port();
+        let addr = format!("http://127.0.0.1:{}", port);
+
+        let test_user = TestUser::generate();
+        test_user.create_user(&pg_pool).await;
+
+        // tokio spawn background thread an run app
+        // We want to hold thread instance until tests finish (or end of tokio::test)
+        // tokio::test manage background threads and terminate them when tests finish
+        tokio::spawn(app.run_until_terminated());
+
+        if self.spawn_newsletters_issues_delivery_worker {
+            tokio::spawn(
+                NewslettersIssuesDeliveryWorker::builder(settings.clone(), notify)
+                    .set_pg_pool(pg_pool.clone())
+                    .run_until_terminated(),
+            );
+        }
+        if self.spawn_delete_expired_idempotency_worker {
+            tokio::spawn(
+                DeleteExpiredIdempotencyWorker::builder(settings)
+                    .set_pg_pool(pg_pool.clone())
+                    .run_until_terminated(),
+            );
+        }
+
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .cookie_store(true)
+            .build()
+            .unwrap();
+
+        Ok(TestApp {
+            client,
+            addr,
+            port,
+            pg_pool,
+            email_server,
+            email_client,
+            test_user,
+        })
+    }
+}
+
 static TRACING: Lazy<()> = Lazy::new(|| {
     let test_name = "test_app";
     let default_log_level = "debug";
@@ -171,70 +275,6 @@ static TRACING: Lazy<()> = Lazy::new(|| {
         ));
     }
 });
-
-pub async fn spawn_app() -> std::io::Result<TestApp> {
-    // Lazy mean only run when it is called
-    // once_cell make sure it is only run once on entire program lifetime
-    Lazy::force(&TRACING);
-
-    let email_server = MockServer::start().await;
-
-    let settings = {
-        let mut settings = Settings::get_configuration().expect("Failed to read configuration");
-
-        // Use port 0 to ask the OS to pick a random free port
-        settings.application.port = 0;
-        // Use mock server to as email server for testing
-        settings.email_client.api_base_url = email_server.uri();
-        settings
-    };
-
-    let notify = Arc::new(Notify::new());
-    let email_client = get_email_client(settings.email_client.clone());
-    let pg_pool = get_test_database(&settings.database).await;
-    let app = Application::builder(settings.clone(), notify.clone())
-        .set_pg_pool(pg_pool.clone())
-        .build()
-        .await
-        .expect("Failed to build Server");
-
-    let port = app.port();
-    let addr = format!("http://127.0.0.1:{}", port);
-
-    let test_user = TestUser::generate();
-    test_user.create_user(&pg_pool).await;
-
-    // tokio spawn background thread an run app
-    // We want to hold thread instance until tests finish (or end of tokio::test)
-    // tokio::test manage background threads and terminate them when tests finish
-    tokio::spawn(app.run_until_terminated());
-    tokio::spawn(
-        NewslettersIssuesDeliveryWorker::builder(settings.clone(), notify)
-            .set_pg_pool(pg_pool.clone())
-            .run_until_terminated(),
-    );
-    tokio::spawn(
-        DeleteExpiredIdempotencyWorker::builder(settings)
-            .set_pg_pool(pg_pool.clone())
-            .run_until_terminated(),
-    );
-
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .cookie_store(true)
-        .build()
-        .unwrap();
-
-    Ok(TestApp {
-        client,
-        addr,
-        port,
-        pg_pool,
-        email_server,
-        email_client,
-        test_user,
-    })
-}
 
 pub struct ConfirmationLinks {
     pub html: String,

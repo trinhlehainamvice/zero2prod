@@ -1,9 +1,9 @@
-use crate::helpers::{assert_redirects_to, spawn_app};
+use crate::helpers::{assert_redirects_to, TestApp};
 
 #[tokio::test]
 async fn wrong_current_password() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     let login_form = serde_json::json!({
         "username": &app.test_user.username,
         "password": &app.test_user.password
@@ -32,7 +32,7 @@ async fn wrong_current_password() {
 #[tokio::test]
 async fn password_mismatch() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     let login_form = serde_json::json!({
         "username": &app.test_user.username,
         "password": &app.test_user.password
@@ -73,7 +73,7 @@ async fn password_mismatch() {
 #[tokio::test]
 async fn new_password_same_as_current() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     let login_form = serde_json::json!({
         "username": &app.test_user.username,
         "password": &app.test_user.password
@@ -99,7 +99,7 @@ async fn new_password_same_as_current() {
 #[tokio::test]
 async fn change_password_succeed() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     let login_form = serde_json::json!({
         "username": &app.test_user.username,
         "password": &app.test_user.password

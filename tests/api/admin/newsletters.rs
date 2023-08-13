@@ -1,4 +1,4 @@
-use crate::helpers::{assert_redirects_to, create_confirmed_subscriber, spawn_app};
+use crate::helpers::{assert_redirects_to, create_confirmed_subscriber, TestApp};
 use fake::faker::lorem::en::{Paragraph, Sentence};
 use fake::Fake;
 use std::time::Duration;
@@ -9,7 +9,7 @@ use wiremock::ResponseTemplate;
 #[tokio::test]
 async fn publish_newsletters_invalid_form_data_ret_400() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     create_confirmed_subscriber(&app).await;
 
     // Act 1 login
@@ -47,7 +47,7 @@ async fn publish_newsletters_invalid_form_data_ret_400() {
 #[tokio::test]
 async fn publish_newsletters_without_login_redirects_to_login() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     let idempotency_key = Uuid::new_v4().to_string();
     let newsletter_body = serde_json::json!({
         "title": "Newsletter title",
@@ -65,7 +65,7 @@ async fn publish_newsletters_without_login_redirects_to_login() {
 #[tokio::test]
 async fn publish_newsletters_as_valid_user_redirects_to_newsletters_with_success_message() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     create_confirmed_subscriber(&app).await;
 
     // Act 1 login
@@ -92,7 +92,7 @@ async fn publish_newsletters_as_valid_user_redirects_to_newsletters_with_success
 #[tokio::test]
 async fn publish_newsletters_as_invalid_user_redirects_to_login() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder().build().await.unwrap();
     let idempotency_key = Uuid::new_v4().to_string();
     let newsletter_body = serde_json::json!({
         "title": "Newsletter title",
@@ -134,7 +134,11 @@ async fn publish_newsletters_as_invalid_user_redirects_to_login() {
 #[tokio::test]
 async fn publish_duplicate_newsletters_ret_same_response() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder()
+        .spawn_newsletters_issues_delivery_worker()
+        .build()
+        .await
+        .unwrap();
 
     create_confirmed_subscriber(&app).await;
 
@@ -178,7 +182,11 @@ async fn publish_duplicate_newsletters_ret_same_response() {
 #[tokio::test(flavor = "multi_thread")]
 async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder()
+        .spawn_newsletters_issues_delivery_worker()
+        .build()
+        .await
+        .unwrap();
     create_confirmed_subscriber(&app).await;
 
     wiremock::Mock::given(path("/email"))
@@ -222,7 +230,11 @@ async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
 #[tokio::test(flavor = "multi_thread")]
 async fn forward_recovery_send_emails_when_user_post_newsletter() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder()
+        .spawn_newsletters_issues_delivery_worker()
+        .build()
+        .await
+        .unwrap();
 
     // Act 1 login
     app.login().await;
@@ -280,7 +292,11 @@ async fn forward_recovery_send_emails_when_user_post_newsletter() {
 #[tokio::test(flavor = "multi_thread")]
 async fn publish_multiple_newsletters() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder()
+        .spawn_newsletters_issues_delivery_worker()
+        .build()
+        .await
+        .unwrap();
     app.login().await;
 
     let n_subscribers: u64 = (5..10).fake();
@@ -319,7 +335,13 @@ async fn publish_multiple_newsletters() {
 #[tokio::test(flavor = "multi_thread")]
 async fn idempotency_expired_and_republish_newsletter() {
     // Arrange
-    let app = spawn_app().await.unwrap();
+    let app = TestApp::builder()
+        .spawn_newsletters_issues_delivery_worker()
+        .spawn_delete_expired_idempotency_worker()
+        .idempotency_expiration_time_millis(10)
+        .build()
+        .await
+        .unwrap();
 
     app.login().await;
 
@@ -348,8 +370,7 @@ async fn idempotency_expired_and_republish_newsletter() {
     assert_redirects_to(&response, "/admin/newsletters");
 
     // Act 2 wait until idempotency is expired, then check idempotency key is deleted in database
-    // idempotency_expiration_millis is set to 500 in local (test) settings
-    tokio::time::sleep(Duration::from_millis(700)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     let result = sqlx::query!(
         r#"

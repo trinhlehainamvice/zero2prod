@@ -1,10 +1,13 @@
-use crate::helpers::{assert_redirects_to, spawn_app};
+use crate::helpers::{assert_redirects_to, TestApp};
 use uuid::Uuid;
 
 #[tokio::test]
 async fn login_failed_redirects_to_login() {
     // Arrange
-    let app = spawn_app().await.expect("Failed to spawn app");
+    let app = TestApp::builder()
+        .build()
+        .await
+        .expect("Failed to spawn app");
     let username = Uuid::new_v4().to_string();
     let password = Uuid::new_v4().to_string();
 
@@ -29,7 +32,10 @@ async fn login_failed_redirects_to_login() {
 #[tokio::test]
 async fn login_successfully_redirects_to_home() {
     // Arrange
-    let app = spawn_app().await.expect("Failed to spawn app");
+    let app = TestApp::builder()
+        .build()
+        .await
+        .expect("Failed to spawn app");
 
     let login_form = serde_json::json!({
         "username": &app.test_user.username,
