@@ -207,7 +207,7 @@ async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
         texts.push(response.text().await.unwrap());
     }
 
-    // Assert expect all responses' contents to be the same
+    // Assert expect all response contents to be the same
     assert!(texts.windows(2).all(|text| text[0] == text[1]));
 }
 
@@ -259,6 +259,16 @@ async fn publish_multiple_newsletters() {
 
     let n_publish: u64 = (5..10).fake();
 
+    // Because each test case is executed once at a time and in order
+    // So we can believe that the number of messages are not affected by another test
+    // We can cache the number of messages in mock email server before publish newsletters
+    let msg_count_before_publish = app
+        .get_email_messages_json()
+        .await
+        .as_array()
+        .unwrap()
+        .len();
+
     for _ in 0..n_publish {
         let title: String = Sentence(10..20).fake();
         let text: String = Paragraph(50..100).fake();
@@ -272,6 +282,25 @@ async fn publish_multiple_newsletters() {
         let response = app.post_newsletters(&newsletter_body).await;
         assert_redirects_to(&response, "/admin/newsletters");
     }
+
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        app.wait_until_email_messages_match(msg_count_before_publish, n_publish as usize),
+    )
+    .await
+    .expect("Failed to wait until email server receive expected number of requests");
+
+    let current_msg_count = app
+        .get_email_messages_json()
+        .await
+        .as_array()
+        .unwrap()
+        .len();
+
+    assert_eq!(
+        current_msg_count - msg_count_before_publish,
+        n_publish as usize
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -296,6 +325,13 @@ async fn idempotency_expired_and_republish_newsletter() {
         "html_content": "<p>Newsletter body as HTML</p>",
         "idempotency_key": Uuid::new_v4().to_string()
     });
+
+    let msg_count_before_publish = app
+        .get_email_messages_json()
+        .await
+        .as_array()
+        .unwrap()
+        .len();
 
     // Act 1 publish newsletters
     let response = app.post_newsletters(&newsletter_body).await;
@@ -322,4 +358,20 @@ async fn idempotency_expired_and_republish_newsletter() {
 
     let response = app.post_newsletters(&newsletter_body).await;
     assert_redirects_to(&response, "/admin/newsletters");
+
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        app.wait_until_email_messages_match(msg_count_before_publish, 4),
+    )
+    .await
+    .expect("Failed to wait until email server receive expected number of requests");
+
+    let current_msg_count = app
+        .get_email_messages_json()
+        .await
+        .as_array()
+        .unwrap()
+        .len();
+
+    assert_eq!(current_msg_count - msg_count_before_publish, 4);
 }

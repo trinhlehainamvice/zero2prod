@@ -7,6 +7,7 @@ use once_cell::sync::Lazy;
 use rand::rngs::OsRng;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Notify;
 use uuid::Uuid;
 use zero2prod::configuration::{DatabaseSettings, Settings};
@@ -113,19 +114,38 @@ impl TestApp {
             .expect("Failed to read response body.")
     }
 
-    pub async fn get_confirmation_links(&self, email: &str) -> ConfirmationLinks {
-        let email_server_api_host = "http://localhost:1080";
-
+    pub async fn wait_until_email_messages_match(
+        &self,
+        msg_count_before_publish: usize,
+        n_publish: usize,
+    ) {
+        loop {
+            let current_msg_count = self
+                .get_email_messages_json()
+                .await
+                .as_array()
+                .unwrap()
+                .len();
+            if current_msg_count - msg_count_before_publish == n_publish {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await
+        }
+    }
+    pub async fn get_email_messages_json(&self) -> serde_json::Value {
         let response = reqwest::Client::new()
-            .get(format!("{}/api/messages", email_server_api_host))
+            .get("http://localhost:1080/api/messages")
             .send()
             .await
             .expect("Fail to get email messages");
 
         assert_eq!(response.status().as_u16(), 200);
 
-        let messages: serde_json::Value =
-            response.json().await.expect("Fail to parse email messages");
+        response.json().await.expect("Fail to parse email messages")
+    }
+
+    pub async fn get_confirmation_links(&self, email: &str) -> ConfirmationLinks {
+        let messages = self.get_email_messages_json().await;
 
         let message_id = messages
             .as_array()
@@ -142,10 +162,7 @@ impl TestApp {
             .unwrap();
 
         let response = reqwest::Client::new()
-            .get(format!(
-                "{}/api/message/{}",
-                email_server_api_host, message_id
-            ))
+            .get(format!("http://localhost:1080/api/message/{}", message_id))
             .send()
             .await
             .expect("Fail to get confirm email message");

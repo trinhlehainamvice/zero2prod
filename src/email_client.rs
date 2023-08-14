@@ -53,7 +53,7 @@ impl EmailClient {
     pub fn sender_email(&self) -> &str {
         self.sender_email.as_ref()
     }
-    
+
     pub async fn send_multipart_email(
         &self,
         recipient_email: &SubscriberEmail,

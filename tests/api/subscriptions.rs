@@ -3,8 +3,6 @@ use fake::faker::internet::en::SafeEmail;
 use fake::faker::name::en::Name;
 use fake::Fake;
 
-// TODO: check these tests again
-
 #[tokio::test]
 async fn post_subscribe_in_urlencoded_valid_format_ret_200() {
     // Arrange
@@ -46,10 +44,17 @@ async fn post_subscribe_in_urlencoded_format_with_missing_data_ret_400() {
 async fn query_pending_confirmation_subscriber_after_user_send_subscription_form_ret_200() {
     // Arrange
     let app = TestApp::builder().build().await.unwrap();
-    let body = "name=Foo%20Bar&email=foobar%40example.com";
+    let name: String = Name().fake();
+    let email: String = SafeEmail().fake();
+    let body = serde_json::json!({
+        "name": name,
+        "email": email
+    });
 
     // Act
-    let response = app.post_subscriptions(body.into()).await;
+    let response = app
+        .post_subscriptions(serde_urlencoded::to_string(body.clone()).unwrap())
+        .await;
 
     // Assert
     assert!(response.status().is_success());
@@ -61,8 +66,8 @@ async fn query_pending_confirmation_subscriber_after_user_send_subscription_form
         .expect("Failed to fetch saved subscriptions");
 
     // Assert
-    assert_eq!("foobar@example.com", subscriber.email);
-    assert_eq!("Foo Bar", subscriber.name);
+    assert_eq!(body["email"].as_str().unwrap(), subscriber.email);
+    assert_eq!(body["name"].as_str().unwrap(), subscriber.name);
     assert_eq!("pending", subscriber.status);
 }
 
@@ -70,7 +75,6 @@ async fn query_pending_confirmation_subscriber_after_user_send_subscription_form
 async fn click_confirmation_link_in_email_and_query_subscriber_status_as_confirmed_ret_200() {
     // Arrange
     let app = TestApp::builder().build().await.unwrap();
-
     let name: String = Name().fake();
     let email: String = SafeEmail().fake();
     let body = serde_json::json!({
@@ -113,10 +117,15 @@ async fn click_confirmation_link_in_email_and_query_subscriber_status_as_confirm
 }
 
 #[tokio::test]
-async fn internal_query_error_ret_500() {
+async fn drop_subscription_token_column_to_cause_internal_error_when_send_subscription() {
     // Arrange
     let app = TestApp::builder().build().await.unwrap();
-    let body = "name=Foo%20Bar&email=foobar%40example.com";
+    let name: String = Name().fake();
+    let email: String = SafeEmail().fake();
+    let body = serde_json::json!({
+        "name": name,
+        "email": email
+    });
 
     sqlx::query!(
         r#"
@@ -129,7 +138,9 @@ async fn internal_query_error_ret_500() {
     .unwrap();
 
     // Act
-    let response = app.post_subscriptions(body.into()).await;
+    let response = app
+        .post_subscriptions(serde_urlencoded::to_string(body).unwrap())
+        .await;
 
     // Assert
     assert_eq!(500, response.status().as_u16());
