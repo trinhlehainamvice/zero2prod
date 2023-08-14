@@ -14,10 +14,12 @@ database:
   database_name: newsletter
   require_ssl: false
 email_client:
-  username: 9YfJ5@example.com
-  password: password
+  # use mailcrab to host mock smtp server
+  # mailcrab localhost doesn't require username and password
+  # username: admin
+  # password: password
   host: localhost
   port: 1025
-  sender_email: 9YfJ5@example.com
+  sender_email: admin@example.com
   require_tls: false
   request_timeout_millis: 50

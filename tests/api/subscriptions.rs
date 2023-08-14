@@ -1,18 +1,14 @@
-use crate::helpers::{ConfirmationLinks, TestApp};
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, ResponseTemplate};
+use crate::helpers::TestApp;
+use fake::faker::internet::en::SafeEmail;
+use fake::faker::name::en::Name;
+use fake::Fake;
+
+// TODO: check these tests again
 
 #[tokio::test]
 async fn post_subscribe_in_urlencoded_valid_format_ret_200() {
     // Arrange
     let app = TestApp::builder().build().await.unwrap();
-
-    Mock::given(path("/email"))
-        .and(method("POST"))
-        .respond_with(ResponseTemplate::new(200))
-        .expect(1)
-        .mount(&app.email_server)
-        .await;
 
     // Act
     let body = "name=Foo%20Bar&email=foobar%40example.com";
@@ -23,7 +19,7 @@ async fn post_subscribe_in_urlencoded_valid_format_ret_200() {
 }
 
 #[tokio::test]
-async fn test_400_fail_post_subscribe_in_urlencoded_format_when_missing_data() {
+async fn post_subscribe_in_urlencoded_format_with_missing_data_ret_400() {
     // Arrange
     let app = TestApp::builder().build().await.unwrap();
     let test_cases = vec![
@@ -47,37 +43,10 @@ async fn test_400_fail_post_subscribe_in_urlencoded_format_when_missing_data() {
 }
 
 #[tokio::test]
-async fn test_200_success_connect_to_database_and_subscribe_valid_data_in_urlencoded_format() {
-    // Arrange
-    let app = TestApp::builder().build().await.unwrap();
-    let body = "name=Foo%20Bar&email=foobar%40example.com";
-
-    Mock::given(path("/email"))
-        .and(method("POST"))
-        .respond_with(ResponseTemplate::new(200))
-        .expect(1)
-        .mount(&app.email_server)
-        .await;
-
-    // Act
-    let response = app.post_subscriptions(body.into()).await;
-
-    // Assert
-    assert!(response.status().is_success());
-}
-
-#[tokio::test]
 async fn query_pending_confirmation_subscriber_after_user_send_subscription_form_ret_200() {
     // Arrange
     let app = TestApp::builder().build().await.unwrap();
     let body = "name=Foo%20Bar&email=foobar%40example.com";
-
-    Mock::given(path("/email"))
-        .and(method("POST"))
-        .respond_with(ResponseTemplate::new(200))
-        .expect(1)
-        .mount(&app.email_server)
-        .await;
 
     // Act
     let response = app.post_subscriptions(body.into()).await;
@@ -94,51 +63,25 @@ async fn query_pending_confirmation_subscriber_after_user_send_subscription_form
     // Assert
     assert_eq!("foobar@example.com", subscriber.email);
     assert_eq!("Foo Bar", subscriber.name);
-    assert_eq!("pending_confirmation", subscriber.status);
-}
-
-#[tokio::test]
-async fn send_confirmation_to_subscriber_email_with_link_return_200() {
-    // Arrange
-    let app = TestApp::builder().build().await.unwrap();
-
-    Mock::given(path("/email"))
-        .and(method("POST"))
-        .respond_with(ResponseTemplate::new(200))
-        .expect(1)
-        .mount(&app.email_server)
-        .await;
-
-    // Act
-    let body = "name=Foo%20Bar&email=foobar%40example.com";
-    let response = app.post_subscriptions(body.into()).await;
-
-    let email_request = &app.email_server.received_requests().await.unwrap()[0];
-    let confirmation_links = ConfirmationLinks::get_confirmation_link(email_request);
-    let html_link = confirmation_links.html;
-    let text_link = confirmation_links.plain_text;
-
-    // Confirmation link in HTML body and plain text body need to be the same
-    assert_eq!(html_link, text_link);
-
-    // Assert
-    assert!(response.status().is_success());
+    assert_eq!("pending", subscriber.status);
 }
 
 #[tokio::test]
 async fn click_confirmation_link_in_email_and_query_subscriber_status_as_confirmed_ret_200() {
     // Arrange
     let app = TestApp::builder().build().await.unwrap();
-    Mock::given(path("/email"))
-        .and(method("POST"))
-        .respond_with(ResponseTemplate::new(200))
-        .expect(1)
-        .mount(&app.email_server)
-        .await;
-    let body = "name=Foo%20Bar&email=foobar%40example.com";
+
+    let name: String = Name().fake();
+    let email: String = SafeEmail().fake();
+    let body = serde_json::json!({
+        "name": name,
+        "email": email
+    });
 
     // Act
-    let response = app.post_subscriptions(body.into()).await;
+    let response = app
+        .post_subscriptions(serde_urlencoded::to_string(body.clone()).unwrap())
+        .await;
 
     // Assert
     assert!(response.status().is_success());
@@ -149,22 +92,14 @@ async fn click_confirmation_link_in_email_and_query_subscriber_status_as_confirm
         .await
         .expect("Failed to fetch saved subscriptions");
 
-    assert_eq!("foobar@example.com", saved.email);
-    assert_eq!("Foo Bar", saved.name);
-    assert_eq!("pending_confirmation", saved.status);
+    assert_eq!(body["email"].as_str().unwrap(), saved.email);
+    assert_eq!(body["name"].as_str().unwrap(), saved.name);
+    assert_eq!("pending", saved.status);
 
-    // Arrange
-    let email_request = &app.email_server.received_requests().await.unwrap()[0];
-    let confirmation_links = ConfirmationLinks::get_confirmation_link(email_request);
-    let mut confirmation_link = reqwest::Url::parse(&confirmation_links.html).unwrap();
-    confirmation_link.set_port(Some(app.port)).unwrap();
-
-    // Act
-    reqwest::get(confirmation_link)
-        .await
-        .unwrap()
-        .error_for_status()
-        .unwrap();
+    let confirmation_link = app
+        .get_confirmation_links(body["email"].as_str().unwrap())
+        .await;
+    app.click_confirmation_link(&confirmation_link).await;
 
     // Assert
     let saved = sqlx::query!("SELECT email, name, status FROM subscriptions")
@@ -172,8 +107,8 @@ async fn click_confirmation_link_in_email_and_query_subscriber_status_as_confirm
         .await
         .expect("Failed to fetch saved subscriptions");
 
-    assert_eq!("foobar@example.com", saved.email);
-    assert_eq!("Foo Bar", saved.name);
+    assert_eq!(body["email"].as_str().unwrap(), saved.email);
+    assert_eq!(body["name"].as_str().unwrap(), saved.name);
     assert_eq!("confirmed", saved.status);
 }
 

@@ -50,6 +50,10 @@ impl EmailClient {
         })
     }
 
+    pub fn sender_email(&self) -> &str {
+        self.sender_email.as_ref()
+    }
+    
     pub async fn send_multipart_email(
         &self,
         recipient_email: &SubscriberEmail,
@@ -105,10 +109,6 @@ mod tests {
     use fake::faker::lorem::en::{Paragraph, Sentence};
     use fake::Fake;
 
-    // NOTE: these tests depending on mailcrab to host mock smtp server
-    // make sure to launch mailcrab on local machine or docker before running the tests
-    // REF: https://github.com/tweedegolf/mailcrab
-
     fn subject() -> String {
         Sentence(1..2).fake()
     }
@@ -133,6 +133,9 @@ mod tests {
         100
     }
 
+    // NOTE: these tests depending on mailcrab to host mock smtp server
+    // make sure to launch mailcrab on local machine or docker before running the tests
+    // REF: https://github.com/tweedegolf/mailcrab
     #[tokio::test]
     async fn send_email() {
         let email_client = EmailClient::new(
@@ -154,7 +157,11 @@ mod tests {
         let response = email_client
             .send_multipart_email(&recipient_email, &subject, &plain_text, &html_text)
             .await
-            .expect("Failed to send email");
+            .expect(
+                "Failed to send email to smtp server \
+            This test depending on mailcrab as local smtp server\
+            Launch mailcrab before running this test again",
+            );
 
         let messages: Vec<_> = response.message().collect();
         assert_eq!(messages.len(), 1);

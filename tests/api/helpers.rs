@@ -9,8 +9,6 @@ use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::sync::Arc;
 use tokio::sync::Notify;
 use uuid::Uuid;
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
 use zero2prod::configuration::{DatabaseSettings, Settings};
 use zero2prod::email_client::EmailClient;
 use zero2prod::newsletters_issues::{
@@ -25,7 +23,6 @@ pub struct TestApp {
     pub addr: String,
     pub port: u16,
     pub pg_pool: PgPool,
-    pub email_server: MockServer,
     pub email_client: EmailClient,
     pub test_user: TestUser,
 }
@@ -116,30 +113,53 @@ impl TestApp {
             .expect("Failed to read response body.")
     }
 
-    pub async fn create_unconfirmed_subscriber(&self, body: &str) -> ConfirmationLinks {
-        // Arrange
-        let _scoped_mock = Mock::given(path("/email"))
-            .and(method("POST"))
-            .respond_with(ResponseTemplate::new(200))
-            .expect(1)
-            .mount_as_scoped(&self.email_server)
-            .await;
+    pub async fn get_confirmation_links(&self, email: &str) -> ConfirmationLinks {
+        let email_server_api_host = "http://localhost:1080";
 
-        // Act
-        self.post_subscriptions(body.into()).await;
-        // Because Mock Server Instance stack ups all incoming requests
-        let requests = self.email_server.received_requests().await.unwrap();
-        // Need to get the last request in received_requests (latest one) from Mock Server
-        let email_request = requests.last().unwrap();
+        let response = reqwest::Client::new()
+            .get(format!("{}/api/messages", email_server_api_host))
+            .send()
+            .await
+            .expect("Fail to get email messages");
 
-        ConfirmationLinks::get_confirmation_link(email_request)
+        assert_eq!(response.status().as_u16(), 200);
 
-        // Assert when scoped_mock drop
+        let messages: serde_json::Value =
+            response.json().await.expect("Fail to parse email messages");
+
+        let message_id = messages
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|msg| {
+                msg["from"]["email"].as_str() == Some(self.email_client.sender_email())
+                    && msg["to"][0]["email"].as_str() == Some(email)
+            })
+            .unwrap()
+            .get("id")
+            .unwrap()
+            .as_str()
+            .unwrap();
+
+        let response = reqwest::Client::new()
+            .get(format!(
+                "{}/api/message/{}",
+                email_server_api_host, message_id
+            ))
+            .send()
+            .await
+            .expect("Fail to get confirm email message");
+        assert_eq!(response.status().as_u16(), 200);
+
+        let message_json: serde_json::Value = response
+            .json()
+            .await
+            .expect("Fail to parse confirm email message to json");
+
+        ConfirmationLinks::get_confirmation_links(message_json)
     }
 
-    pub async fn create_confirmed_subscriber(&self, body: &str) {
-        // Arrange
-        let confirmation_links = self.create_unconfirmed_subscriber(body).await;
+    pub async fn click_confirmation_link(&self, confirmation_links: &ConfirmationLinks) {
         let mut link = reqwest::Url::parse(&confirmation_links.html).unwrap();
         link.set_port(Some(self.port)).unwrap();
 
@@ -151,6 +171,18 @@ impl TestApp {
             .unwrap()
             .error_for_status()
             .unwrap();
+    }
+
+    pub async fn create_confirmed_subscriber(&self, body: serde_json::Value) {
+        // Arrange
+        let urlencoded_body = serde_urlencoded::to_string(&body).unwrap();
+        self.post_subscriptions(urlencoded_body).await;
+
+        let confirmation_links = self
+            .get_confirmation_links(body["email"].as_str().unwrap())
+            .await;
+
+        self.click_confirmation_link(&confirmation_links).await;
     }
 }
 
@@ -183,24 +215,23 @@ impl TestAppBuilder {
         self
     }
 
-    pub async fn build(self) -> std::io::Result<TestApp> {
+    pub async fn build(self) -> anyhow::Result<TestApp> {
         // Lazy mean only run when it is called
         // once_cell make sure it is only run once on entire program lifetime
         Lazy::force(&TRACING);
-
-        let email_server = MockServer::start().await;
 
         let settings = {
             let mut settings = Settings::get_configuration().expect("Failed to read configuration");
 
             // Use port 0 to ask the OS to pick a random free port
             settings.application.port = 0;
-            // Use mock server to as email server for testing
-            settings.email_client.host = email_server.uri();
 
             if let Some(time_millis) = self.idempotency_expiration_time_millis {
                 settings.application.idempotency_expiration_millis = time_millis;
             }
+
+            // Increase uniqueness of each test case
+            settings.email_client.sender_email = SafeEmail().fake();
 
             settings
         };
@@ -251,7 +282,6 @@ impl TestAppBuilder {
             addr,
             port,
             pg_pool,
-            email_server,
             email_client,
             test_user,
         })
@@ -291,10 +321,11 @@ fn get_link(s: &str) -> String {
 }
 
 impl ConfirmationLinks {
-    pub fn get_confirmation_link(req: &wiremock::Request) -> Self {
-        let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
-        let html = get_link(body["HtmlBody"].as_str().unwrap());
-        let plain_text = get_link(body["TextBody"].as_str().unwrap());
+    pub fn get_confirmation_links(message_json: serde_json::Value) -> Self {
+        let html = get_link(message_json["html"].as_str().unwrap());
+        let plain_text = get_link(message_json["text"].as_str().unwrap());
+        assert_eq!(html.len(), plain_text.len());
+        assert_eq!(html, plain_text);
         Self { html, plain_text }
     }
 }
@@ -376,11 +407,10 @@ pub fn assert_redirects_to(response: &reqwest::Response, location: &str) {
 pub async fn create_confirmed_subscriber(app: &TestApp) {
     let name: String = Name().fake();
     let email: String = SafeEmail().fake();
-    let body = serde_urlencoded::to_string(serde_json::json!({
+    let body = serde_json::json!({
         "name": name,
         "email": email
-    }))
-    .expect("Failed to subscriber json form to urlencoded");
+    });
 
-    app.create_confirmed_subscriber(&body).await;
+    app.create_confirmed_subscriber(body).await;
 }

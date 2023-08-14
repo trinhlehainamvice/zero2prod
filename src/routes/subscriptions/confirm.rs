@@ -24,7 +24,7 @@ pub async fn confirm(
 
     match get_subscription_status(&subscription_id, &pg_pool).await {
         Ok(status) => {
-            if status == "pending_confirmation"
+            if status == SubscriptionStatus::Pending.as_ref()
                 && update_subscriber_status_to_confirmed(&subscription_id, &pg_pool)
                     .await
                     .is_err()

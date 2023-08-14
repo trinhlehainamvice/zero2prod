@@ -198,8 +198,10 @@ async fn send_confirmation_email(
     // TODO: make better form
     let subject = "Confirmation";
     let html_body = format!(
-        "Welcome to our newsletter!<br />\
-        Click <a href=\"{}\">here</a> to confirm your subscription.",
+        "<p>\
+        Welcome to our newsletter!<br />\
+        Click <a href=\"{}\">here</a> to confirm your subscription.\
+        </p>",
         confirmation_link,
     );
     let text_body = format!(
