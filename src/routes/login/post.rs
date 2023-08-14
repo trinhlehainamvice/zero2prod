@@ -1,9 +1,9 @@
 use crate::authentication::{validate_credentials, AuthError, Credentials, UserSession};
 use crate::utils::error_chain_fmt;
+use actix_web::http::header::LOCATION;
 use actix_web::http::StatusCode;
 use actix_web::{web, HttpResponse, ResponseError};
 use actix_web_flash_messages::FlashMessage;
-use reqwest::header::LOCATION;
 use secrecy::Secret;
 use sqlx::PgPool;
 use std::fmt::Debug;

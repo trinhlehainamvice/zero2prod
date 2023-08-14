@@ -17,7 +17,7 @@ use zero2prod::newsletters_issues::{
     try_execute_task, DeleteExpiredIdempotencyWorker, ExecutionResult,
     NewslettersIssuesDeliveryWorker,
 };
-use zero2prod::startup::{get_email_client, Application};
+use zero2prod::startup::{build_email_client, Application};
 use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
 
 pub struct TestApp {
@@ -196,7 +196,7 @@ impl TestAppBuilder {
             // Use port 0 to ask the OS to pick a random free port
             settings.application.port = 0;
             // Use mock server to as email server for testing
-            settings.email_client.api_base_url = email_server.uri();
+            settings.email_client.host = email_server.uri();
 
             if let Some(time_millis) = self.idempotency_expiration_time_millis {
                 settings.application.idempotency_expiration_millis = time_millis;
@@ -206,7 +206,7 @@ impl TestAppBuilder {
         };
 
         let notify = Arc::new(Notify::new());
-        let email_client = get_email_client(settings.email_client.clone());
+        let email_client = build_email_client(settings.email_client.clone())?;
         let pg_pool = get_test_database(&settings.database).await;
         let app = Application::builder(settings.clone(), notify.clone())
             .set_pg_pool(pg_pool.clone())

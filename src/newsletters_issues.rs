@@ -1,7 +1,7 @@
 use crate::configuration::Settings;
 use crate::email_client::EmailClient;
 use crate::routes::{SubscriberEmail, SubscriptionStatus};
-use crate::startup::{get_email_client, get_pg_pool};
+use crate::startup::{build_email_client, get_pg_pool};
 use sqlx::postgres::types::PgInterval;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -28,11 +28,11 @@ impl NewslettersIssuesDeliveryWorker {
         self
     }
 
-    pub async fn run_until_terminated(self) -> Result<(), std::io::Error> {
+    pub async fn run_until_terminated(self) -> Result<(), anyhow::Error> {
         let pg_pool = self
             .pg_pool
             .unwrap_or_else(|| get_pg_pool(&self.settings.database));
-        let email_client = get_email_client(self.settings.email_client.clone());
+        let email_client = build_email_client(self.settings.email_client.clone())?;
         worker_loop(pg_pool, email_client, self.notify).await;
         Ok(())
     }
@@ -108,7 +108,7 @@ pub async fn try_execute_task(
                 );
                 if let Err(e) = email_client
                     // TODO: send email at batch (Postmark)
-                    .send_email(
+                    .send_multipart_email(
                         &subscriber_email,
                         &issue_content.title,
                         &issue_content.text_content,
@@ -415,3 +415,7 @@ async fn get_unfinished_newsletters_issues(
 // TODO: e.g. adding a n_retries and
 // execute_after columns to keep track of how many attempts have already taken place and how long
 // we should wait before trying again. Try implementing it as an exercise
+
+// TODO: change to SMTP client to send emails, and add SMTP server to testing
+
+// TODO: find better way to handle deque tasks and send emails as batch

@@ -30,7 +30,7 @@ tracing-actix-web = "0.7"
 secrecy = { version = "0.8", features = ["serde"] }
 validator = "0.16"
 unicode-segmentation = "1"
-reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls", "cookies"] }
+# reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls", "cookies"] }
 rand = { version = "0.8", features = ["std_rng"] }
 thiserror = "1"
 anyhow = "1"
@@ -42,6 +42,7 @@ htmlescape = "0.3"
 # sha2 = "0.10"
 # hex = "0.4"
 strum = { version = "0.25", features = ["derive"]}
+lettre = { version = "0.10", features = ["builder", "tokio1-native-tls", "pool"] }
 
 [dependencies.sqlx]
 version = "0.6"
@@ -63,6 +64,7 @@ fake = "2.6"
 rand = "0.8"
 quickcheck = "1"
 quickcheck_macros = "1"
+reqwest = { version = "0.11", default-features = false, features = ["json"] }
 wiremock = "0.5"
 tokio = { version = "1", features = ["rt"] }
 linkify = "0.10"

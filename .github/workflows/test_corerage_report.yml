@@ -43,12 +43,15 @@ jobs:
         # Opens tcp port 5432 on the host and service container
         ports:
           - 5432:5432
-      # Label used to access the service container
       redis:
-        # Docker Hub image
         image: redis:6
         ports:
           - 6379:6379
+      mailcrab:
+        image: marlonb/mailcrab:latest
+        ports:
+          - 1080:1080
+          - 1025:1025
     steps:
       # Downloads a copy of the code in your repository before running CI tests
       - name: Check out repository code
@@ -84,7 +87,7 @@ jobs:
 
       - name: Migrate database
         run: SKIP_DOCKER=true ./scripts/init_db.sh
-        
+
       - name: Run tests
         run: cargo test
 
@@ -153,6 +156,11 @@ jobs:
         image: redis:6
         ports:
           - 6379:6379
+      mailcrab:
+        image: marlonb/mailcrab:latest
+        ports:
+          - 1080:1080
+          - 1025:1025
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3

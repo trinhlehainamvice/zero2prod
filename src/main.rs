@@ -10,7 +10,7 @@ use zero2prod::startup::Application;
 use zero2prod::telemetry::config_tracing;
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> anyhow::Result<()> {
     let settings = Settings::get_configuration().expect("Failed to read configuration");
 
     config_tracing(&settings.application);

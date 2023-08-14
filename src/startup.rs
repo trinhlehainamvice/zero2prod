@@ -39,12 +39,12 @@ impl ApplicationBuilder {
         self
     }
 
-    pub async fn build(self) -> Result<Application, std::io::Error> {
+    pub async fn build(self) -> Result<Application, anyhow::Error> {
         let listener = TcpListener::bind(self.settings.application.get_url())?;
 
         let port = listener.local_addr().unwrap().port();
 
-        let email_client = get_email_client(self.settings.email_client.clone());
+        let email_client = build_email_client(self.settings.email_client.clone())?;
         // So to share data between threads, actix-web provide web::Data<T>(Arc<T>)
         // which is a thread-safe reference counting pointer to a value of type T
         let pg_pool = Data::new(match self.pg_pool {
@@ -151,13 +151,16 @@ pub fn get_pg_pool(database_config: &DatabaseSettings) -> PgPool {
         .connect_lazy_with(database_config.get_pg_database_options())
 }
 
-pub fn get_email_client(email_client_config: EmailClientSettings) -> EmailClient {
+pub fn build_email_client(
+    email_client_config: EmailClientSettings,
+) -> Result<EmailClient, anyhow::Error> {
     EmailClient::new(
-        email_client_config.api_base_url,
-        SubscriberEmail::parse(email_client_config.sender_email)
-            .expect("Failed to parse sender email"),
-        email_client_config.auth_header,
-        email_client_config.auth_token,
+        email_client_config.host,
+        SubscriberEmail::parse(email_client_config.sender_email).map_err(|e| anyhow::anyhow!(e))?,
+        email_client_config.username,
+        email_client_config.password,
+        email_client_config.port,
+        email_client_config.require_tls,
         email_client_config.request_timeout_millis,
     )
 }

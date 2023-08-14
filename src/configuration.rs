@@ -1,5 +1,5 @@
 use secrecy::{ExposeSecret, Secret};
-use serde_aux::prelude::deserialize_number_from_string;
+use serde_aux::prelude::{deserialize_number_from_string, deserialize_option_number_from_string};
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 
 const APP_ENV_STATE: &str = "APP_ENV_STATE";
@@ -68,10 +68,13 @@ impl ApplicationSettings {
 
 #[derive(serde::Deserialize, Clone)]
 pub struct EmailClientSettings {
-    pub api_base_url: String,
+    pub username: Option<Secret<String>>,
+    pub password: Option<Secret<String>>,
+    pub host: String,
+    #[serde(default, deserialize_with = "deserialize_option_number_from_string")]
+    pub port: Option<u16>,
     pub sender_email: String,
-    pub auth_header: Secret<String>,
-    pub auth_token: Secret<String>,
+    pub require_tls: bool,
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub request_timeout_millis: u64,
 }

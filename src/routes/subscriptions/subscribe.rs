@@ -190,7 +190,7 @@ async fn send_confirmation_email(
     email_client: web::Data<EmailClient>,
     subscriber_email: &SubscriberEmail,
     subscription_token: &str,
-) -> Result<(), reqwest::Error> {
+) -> Result<(), anyhow::Error> {
     let confirmation_link = format!(
         "{}/subscriptions/confirm?subscription_token={}",
         app_base_url, subscription_token
@@ -208,8 +208,10 @@ async fn send_confirmation_email(
     );
 
     email_client
-        .send_email(subscriber_email, subject, &text_body, &html_body)
-        .await
+        .send_multipart_email(subscriber_email, subject, &text_body, &html_body)
+        .await?;
+
+    Ok(())
 }
 
 // Generate Alphanumeric (A-Z, a-z, 0-9) 25-characters-long case-sensitive subscriptions token

@@ -1,11 +1,11 @@
 application:
   host: 127.0.0.1
   base_url: http://127.0.0.1
-  # actix-web-flash-messages framework (version=0.4) required 64 bytes long crypt string
+  # base64 required 64 bytes long crypt string
   flash_msg_key: j3oO2gtFn8ep8AAGHXDHSmCeYsyvX1Lz8hxDs8csSJ6w5qynXC8P6Xe4eSi0Pc+fyRpAYUcSkZJ7ajjhp6uz5Q==
   redis_url: redis://127.0.0.1:6379
   redis_session_key: j3oO2gtFn8ep8AAGHXDHSmCeYsyvX1Lz8hxDs8csSJ6w5qynXC8P6Xe4eSi0Pc+fyRpAYUcSkZJ7ajjhp6uz5Q==
-  idempotency_expiration_millis: 500
+  idempotency_expiration_millis: 50
 database:
   username: postgres
   password: password
@@ -14,7 +14,10 @@ database:
   database_name: newsletter
   require_ssl: false
 email_client:
-  api_base_url: localhost
+  username: 9YfJ5@example.com
+  password: password
+  host: localhost
+  port: 1025
   sender_email: 9YfJ5@example.com
-  auth_header: X-Mail-Server-Token
-  auth_token: secret_token
+  require_tls: false
+  request_timeout_millis: 50

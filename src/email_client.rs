@@ -1,71 +1,89 @@
 use crate::routes::SubscriberEmail;
+use anyhow::Context;
+use lettre::transport::smtp;
+use lettre::{message, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use secrecy::{ExposeSecret, Secret};
+use std::time::Duration;
 
 // This api app use Email service provider to send email
 // So this app is a client of Email service
 pub struct EmailClient {
-    http_client: reqwest::Client,
-    api_base_url: String,
+    smtp_transport: AsyncSmtpTransport<Tokio1Executor>,
     sender_email: SubscriberEmail,
-    auth_header: Secret<String>,
-    auth_token: Secret<String>,
 }
 
 impl EmailClient {
     pub fn new(
-        api_base_url: String,
+        host: String,
         sender_email: SubscriberEmail,
-        // TODO: API authentication not only depend on header
-        auth_header: Secret<String>,
-        auth_token: Secret<String>,
+        username: Option<Secret<String>>,
+        password: Option<Secret<String>>,
+        port: Option<u16>,
+        require_tls: bool,
         request_timeout_millis: u64,
-    ) -> Self {
-        Self {
-            http_client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(request_timeout_millis))
-                .build()
-                .unwrap(),
-            api_base_url,
-            sender_email,
-            auth_header,
-            auth_token,
-        }
-    }
-
-    pub async fn send_email(
-        &self,
-        recipient_email: &SubscriberEmail,
-        subject: &str,
-        text_body: &str,
-        html_body: &str,
-    ) -> Result<(), reqwest::Error> {
-        let url = reqwest::Url::parse(&self.api_base_url)
-            .expect("Invalid api base url")
-            .join("email")
-            .expect("Invalid api endpoint");
-
-        let request_body = SendEmailRequest {
-            from: self.sender_email.as_ref(),
-            to: recipient_email.as_ref(),
-            subject,
-            text_body,
-            html_body,
+    ) -> Result<Self, anyhow::Error> {
+        let mut smtp_transport = match require_tls {
+            true => AsyncSmtpTransport::<Tokio1Executor>::relay(&host)
+                .context("Failed to create smtp transport")?,
+            false => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&host),
         };
 
-        // TODO: depend on how API server requires authentication to setup
-        self.http_client
-            .post(url.as_str())
-            .header(
-                self.auth_header.expose_secret(),
-                self.auth_token.expose_secret(),
-            )
-            .json(&request_body)
-            .send()
-            .await?
-            // Extract error code from response if any and convert to reqwest::Error
-            .error_for_status()?;
+        if let (Some(username), Some(password)) = (username, password) {
+            let credentials = smtp::authentication::Credentials::new(
+                username.expose_secret().to_string(),
+                password.expose_secret().to_string(),
+            );
+            smtp_transport = smtp_transport.credentials(credentials);
+        }
 
-        Ok(())
+        if let Some(port) = port {
+            smtp_transport = smtp_transport.port(port);
+        }
+
+        let smtp_transport = smtp_transport
+            .timeout(Some(Duration::from_millis(request_timeout_millis)))
+            .build();
+
+        Ok(Self {
+            smtp_transport,
+            sender_email,
+        })
+    }
+
+    pub async fn send_multipart_email(
+        &self,
+        recipient_email: &SubscriberEmail,
+        subject: impl Into<String>,
+        text_content: impl Into<String>,
+        html_content: impl Into<String>,
+    ) -> Result<smtp::response::Response, anyhow::Error> {
+        let message = Message::builder()
+            .from(
+                format!("{} <{}>", "Zero2Prod", self.sender_email.as_ref())
+                    .parse()
+                    .unwrap(),
+            )
+            .to(format!("<{}>", recipient_email.as_ref()).parse().unwrap())
+            .subject(subject)
+            .multipart(
+                message::MultiPart::alternative()
+                    .singlepart(
+                        message::SinglePart::builder()
+                            .header(message::header::ContentType::TEXT_PLAIN)
+                            .body(text_content.into()),
+                    )
+                    .singlepart(
+                        message::SinglePart::builder()
+                            .header(message::header::ContentType::TEXT_HTML)
+                            .body(html_content.into()),
+                    ),
+            )
+            .context("Failed to create email message")?;
+
+        self.smtp_transport
+            .send(message)
+            .await
+            .context("Failed to send message to email service")
     }
 }
 
@@ -85,35 +103,22 @@ mod tests {
     use crate::routes::SubscriberEmail;
     use fake::faker::internet::en::SafeEmail;
     use fake::faker::lorem::en::{Paragraph, Sentence};
-    use fake::{Fake, Faker};
-    use secrecy::Secret;
-    use std::time::Duration;
-    use wiremock::matchers::{any, header, header_exists, method, path};
-    use wiremock::{Mock, MockServer, Request, ResponseTemplate};
+    use fake::Fake;
 
-    struct SendPostmarkEmailRequestBodyMatcher;
-
-    impl wiremock::Match for SendPostmarkEmailRequestBodyMatcher {
-        fn matches(&self, request: &Request) -> bool {
-            match serde_json::from_slice::<serde_json::Value>(&request.body) {
-                Ok(body) => {
-                    body.get("From").is_some()
-                        && body.get("To").is_some()
-                        && body.get("Subject").is_some()
-                        && body.get("TextBody").is_some()
-                        && body.get("HtmlBody").is_some()
-                }
-                _ => false,
-            }
-        }
-    }
+    // NOTE: these tests depending on mailcrab to host mock smtp server
+    // make sure to launch mailcrab on local machine or docker before running the tests
+    // REF: https://github.com/tweedegolf/mailcrab
 
     fn subject() -> String {
         Sentence(1..2).fake()
     }
 
-    fn content() -> String {
+    fn plain_text() -> String {
         Paragraph(1..10).fake()
+    }
+
+    fn html_text() -> String {
+        format!("<p>{}</p>", Paragraph(1..10).fake::<String>())
     }
 
     fn subscriber_email() -> SubscriberEmail {
@@ -124,73 +129,52 @@ mod tests {
         SubscriberEmail::parse(SafeEmail().fake()).unwrap()
     }
 
-    fn auth_header() -> Secret<String> {
-        Secret::new("X-Mail-Server-Token".to_string())
-    }
-
-    fn auth_token() -> Secret<String> {
-        Secret::new(Faker.fake())
-    }
-
     fn timeout_millis() -> u64 {
         100
     }
 
     #[tokio::test]
-    async fn match_postmark_send_email_request() {
-        // Arrange
-        // Make a mock http server on random port on local machine
-        let mock_server = MockServer::start().await;
-        // Retrieve mock server url with `mock_server.uri()`
+    async fn send_email() {
         let email_client = EmailClient::new(
-            mock_server.uri(),
+            "localhost".to_string(),
             sender_email(),
-            auth_header(),
-            auth_token(),
+            None,
+            None,
+            Some(1025),
+            false,
             timeout_millis(),
-        );
+        )
+        .expect("Failed to create email client");
 
-        // Set up expected request requirements for the mock server inside `Mock::given`
-        Mock::given(header_exists("X-Mail-Server-Token"))
-            .and(header("Content-Type", "application/json"))
-            .and(path("/email"))
-            .and(method("POST"))
-            .and(SendPostmarkEmailRequestBodyMatcher)
-            .respond_with(ResponseTemplate::new(200))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
+        let subject = subject();
+        let plain_text = plain_text();
+        let html_text = html_text();
+        let recipient_email = subscriber_email();
 
-        // Act
-        let _ = email_client
-            .send_email(&subscriber_email(), &subject(), &content(), &content())
-            .await;
-    }
+        let response = email_client
+            .send_multipart_email(&recipient_email, &subject, &plain_text, &html_text)
+            .await
+            .expect("Failed to send email");
 
-    #[tokio::test]
-    async fn send_expected_email_client_request_fail_return_400_timeout() {
-        // Arrange
-        // Make a mock http server on random port on local machine
-        let mock_server = MockServer::start().await;
-        // Retrieve mock server url with `mock_server.uri()`
-        let email_client = EmailClient::new(
-            mock_server.uri(),
-            sender_email(),
-            auth_header(),
-            auth_token(),
-            timeout_millis(),
-        );
+        let messages: Vec<_> = response.message().collect();
+        assert_eq!(messages.len(), 1);
+        let message = messages.first().unwrap();
+        assert!(message.contains("2.0.0 Ok: queued as "));
+        let message_id = message.strip_prefix("2.0.0 Ok: queued as ").unwrap();
 
-        // Set up expected request requirements for the mock server inside `Mock::given`
-        Mock::given(any())
-            .respond_with(ResponseTemplate::new(400).set_delay(Duration::from_millis(110)))
-            .expect(1)
-            .mount(&mock_server)
-            .await;
+        let response = reqwest::Client::new()
+            .get(format!("http://localhost:1080/api/message/{}", message_id))
+            .send()
+            .await
+            .expect("Failed to get messages from mailcrab");
+        assert_eq!(response.status().as_u16(), 200);
 
-        // Act
-        let _ = email_client
-            .send_email(&subscriber_email(), &subject(), &content(), &content())
-            .await;
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .expect("Failed to get messages from mailcrab");
+
+        assert_eq!(body["subject"], subject);
+        assert_eq!(body["to"][0]["email"], recipient_email.as_ref());
     }
 }
