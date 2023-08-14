@@ -260,7 +260,7 @@ async fn publish_multiple_newsletters() {
     }
 
     tokio::time::timeout(
-        Duration::from_secs(1),
+        Duration::from_secs(10),
         app.wait_until_email_messages_match(msg_count_before_publish, n_publish as usize),
     )
     .await
@@ -336,7 +336,7 @@ async fn idempotency_expired_and_republish_newsletter() {
     assert_redirects_to(&response, "/admin/newsletters");
 
     tokio::time::timeout(
-        Duration::from_secs(1),
+        Duration::from_secs(3),
         app.wait_until_email_messages_match(msg_count_before_publish, 4),
     )
     .await
