@@ -14,7 +14,7 @@ docker run --rm\
   -p 1080:1080 \
   -p 1025:1025 \
   -d \
-  --name "mailcrab_$(date '+%s')" \
+  --name "mailcrab" \
   marlonb/mailcrab:latest 
   
 >&2 echo "Mailcrab is running on port 6379"
