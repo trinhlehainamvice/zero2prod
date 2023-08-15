@@ -13,12 +13,12 @@ use uuid::Uuid;
 use zero2prod::configuration::{DatabaseSettings, Settings};
 use zero2prod::email_client::EmailClient;
 use zero2prod::newsletters_issues::{
-    try_execute_task, DeleteExpiredIdempotencyWorker, ExecutionResult,
-    NewslettersIssuesDeliveryWorker,
+    DeleteExpiredIdempotencyWorker, NewslettersIssuesDeliveryWorker,
 };
 use zero2prod::startup::{build_email_client, Application};
 use zero2prod::telemetry::{get_tracing_subscriber, init_tracing_subscriber};
 
+#[cfg(not(feature = "pool"))]
 pub struct TestApp {
     pub client: reqwest::Client,
     pub addr: String,
@@ -29,16 +29,6 @@ pub struct TestApp {
 }
 
 impl TestApp {
-    pub async fn send_remaining_emails(&self) -> anyhow::Result<()> {
-        loop {
-            if let ExecutionResult::EmptyQueue =
-                try_execute_task(&self.pg_pool, &self.email_client).await?
-            {
-                return Ok(());
-            }
-        }
-    }
-
     pub async fn login(&self) -> reqwest::Response {
         self.post_login(serde_json::json!({
             "username": &self.test_user.username,

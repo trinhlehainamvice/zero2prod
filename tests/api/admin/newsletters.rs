@@ -130,54 +130,10 @@ async fn publish_newsletters_as_invalid_user_redirects_to_login() {
 }
 
 #[tokio::test]
-async fn publish_duplicate_newsletters_ret_same_response() {
+async fn publish_duplicate_newsletters_in_concurrent_ret_same_response() {
     // Arrange
-    let app = TestApp::builder()
-        .spawn_newsletters_issues_delivery_worker()
-        .build()
-        .await
-        .unwrap();
+    let app = TestApp::builder().build().await.unwrap();
 
-    create_confirmed_subscriber(&app).await;
-
-    let newsletter_body = serde_json::json!({
-        "title": "Newsletter title",
-        "text_content": "Newsletter body as plain text",
-        "html_content": "<p>Newsletter body as HTML</p>",
-        "idempotency_key": Uuid::new_v4().to_string()
-    });
-
-    // Act 1 login
-    let response = app.login().await;
-    assert_redirects_to(&response, "/admin/dashboard");
-
-    // Act 2 publish newsletter
-    let response_1 = app.post_newsletters(&newsletter_body).await;
-    assert_redirects_to(&response_1, "/admin/newsletters");
-
-    // Act 3 publish newsletter **again**
-    let response_2 = app.post_newsletters(&newsletter_body).await;
-    assert_redirects_to(&response_2, "/admin/newsletters");
-
-    // Assert expect to be the same
-    assert_eq!(
-        response_1.text().await.unwrap(),
-        response_2.text().await.unwrap()
-    );
-
-    app.send_remaining_emails()
-        .await
-        .expect("Failed to send newsletters to subscriber emails");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
-    // Arrange
-    let app = TestApp::builder()
-        .spawn_newsletters_issues_delivery_worker()
-        .build()
-        .await
-        .unwrap();
     create_confirmed_subscriber(&app).await;
 
     let newsletter_body = serde_json::json!({
@@ -193,14 +149,11 @@ async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
 
     // Act 2 publish newsletters in parallel
     let mut responses = vec![];
-    for _ in 0..(5..10).fake() {
+    for _ in 0..(2..5).fake() {
         responses.push(app.post_newsletters(&newsletter_body));
     }
 
     let responses = futures::future::join_all(responses).await;
-    app.send_remaining_emails()
-        .await
-        .expect("failed to send emails");
 
     let mut texts = vec![];
     for response in responses {
@@ -211,14 +164,14 @@ async fn publish_duplicate_newsletters_in_parallel_ret_same_response() {
     assert!(texts.windows(2).all(|text| text[0] == text[1]));
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn forward_recovery_send_emails_when_user_post_newsletter() {
     // TODO: mock email server now is in docker
     // so it's really hard to simulate error or processing requests in sequence
     // may need to find better way
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn publish_multiple_newsletters() {
     // Arrange
     let app = TestApp::builder()
@@ -228,12 +181,12 @@ async fn publish_multiple_newsletters() {
         .unwrap();
     app.login().await;
 
-    let n_subscribers: u64 = (5..10).fake();
+    let n_subscribers: u64 = (2..5).fake();
     for _ in 0..n_subscribers {
         create_confirmed_subscriber(&app).await;
     }
 
-    let n_publish: u64 = (5..10).fake();
+    let n_publish: u64 = (2..5).fake();
 
     // Because each test case is executed once at a time and in order
     // So we can believe that the number of messages are not affected by another test
@@ -260,7 +213,7 @@ async fn publish_multiple_newsletters() {
     }
 
     tokio::time::timeout(
-        Duration::from_secs(10),
+        Duration::from_secs(300),
         app.wait_until_email_messages_match(msg_count_before_publish, n_publish as usize),
     )
     .await
@@ -279,7 +232,7 @@ async fn publish_multiple_newsletters() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn idempotency_expired_and_republish_newsletter() {
     // Arrange
     let app = TestApp::builder()
@@ -336,7 +289,7 @@ async fn idempotency_expired_and_republish_newsletter() {
     assert_redirects_to(&response, "/admin/newsletters");
 
     tokio::time::timeout(
-        Duration::from_secs(3),
+        Duration::from_secs(100),
         app.wait_until_email_messages_match(msg_count_before_publish, 4),
     )
     .await

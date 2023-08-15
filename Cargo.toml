@@ -9,11 +9,12 @@ edition = "2021"
 [[bin]]
 path = "src/main.rs"
 name = "zero2prod"
+required-features = ["pool"]
 
 [dependencies]
 actix-web = "4"
 actix-web-flash-messages = { version = "0.4", features = ["cookies"] }
-actix-session = { version = "0.7", features = ["redis-rs-tls-session"]}
+actix-session = { version = "0.7", features = ["redis-rs-tls-session"] }
 actix-web-lab = "0.19"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
@@ -41,8 +42,18 @@ htmlescape = "0.3"
 # hmac = { version = "0.12", features = ["std"] }
 # sha2 = "0.10"
 # hex = "0.4"
-strum = { version = "0.25", features = ["derive"]}
-lettre = { version = "0.10", features = ["builder", "tokio1-native-tls", "pool"] }
+strum = { version = "0.25", features = ["derive"] }
+lettre = { version = "0.10", default-features = false, features = ["builder", "tokio1", "smtp-transport", "tokio1-native-tls"] }
+
+[features]
+# Make lettre pool feature optional
+# When send message with lettre smtp transport pool, lettre open and lock connection until app use this pool match PoolConfig condition
+# - PoolConfig set default connection timeout to 60 secs and max connections to 10
+#   - So connection will be locked until timeout 
+#   - Or match the max number of connections
+# So another app spawn in separate processes by tests need to way an app to release (unlock) pool
+# Set required features when build project in [[bin]]
+pool = ["lettre/pool"]
 
 [dependencies.sqlx]
 version = "0.6"
