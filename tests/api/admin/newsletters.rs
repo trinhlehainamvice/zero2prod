@@ -320,6 +320,7 @@ async fn idempotency_expired_and_republish_newsletter() {
 
     assert!(result.is_none());
 
+    // Act 3 republish newsletters
     let response = app.post_newsletters(&newsletter_body).await;
     assert_redirects_to(&response, "/admin/newsletters");
     n_issues += 1;
@@ -340,6 +341,6 @@ async fn idempotency_expired_and_republish_newsletter() {
 
     assert_eq!(
         current_msg_count - msg_count_before_publish,
-        n_issues as usize
+        (n_issues * n_subscribers) as usize
     );
 }
