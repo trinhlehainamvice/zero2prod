@@ -68,30 +68,22 @@ pub enum ExecutionResult {
     skip_all,
     fields(
         newsletters_issue_id = tracing::field::Empty,
-        subscriber_email = tracing::field::Empty
     )
 )]
 pub async fn try_execute_task(
     pg_pool: &PgPool,
     email_client: &EmailClient,
 ) -> anyhow::Result<ExecutionResult> {
-    let pending_newsletters_issues = get_unfinished_newsletters_issues(pg_pool).await?;
+    let pending_newsletters_issues = get_available_newsletters_issues(pg_pool).await?;
     if pending_newsletters_issues.is_none() {
         return Ok(ExecutionResult::EmptyQueue);
     }
-    let (mut transaction, newsletters_issue_id, issue_content) =
-        pending_newsletters_issues.unwrap();
-    let remaining_emails = dequeue_task(&mut transaction, &newsletters_issue_id, 50).await?;
+    let (newsletters_issue_id, issue_content) = pending_newsletters_issues.unwrap();
+    let (mut transaction, remaining_emails) =
+        dequeue_tasks(pg_pool, &newsletters_issue_id, 50).await?;
     if remaining_emails.is_empty() {
         return Ok(ExecutionResult::EmptyQueue);
     }
-
-    update_newsletter_issue_status(
-        &mut transaction,
-        &newsletters_issue_id,
-        NewsletterIssueStatus::InProcess,
-    )
-    .await?;
 
     tracing::Span::current().record(
         "newsletters_issue_id",
@@ -100,46 +92,69 @@ pub async fn try_execute_task(
 
     let mut finished_emails = vec![];
     for subscriber_email in remaining_emails {
-        match SubscriberEmail::parse(subscriber_email).map_err(|e| anyhow::anyhow!(e)) {
-            Ok(subscriber_email) => {
-                tracing::Span::current().record(
-                    "subscriber_email",
-                    &tracing::field::display(&subscriber_email),
-                );
-                if let Err(e) = email_client
-                    // TODO: send email at batch (Postmark)
-                    .send_multipart_email(
-                        &subscriber_email,
-                        &issue_content.title,
-                        &issue_content.text_content,
-                        &issue_content.html_content,
-                    )
-                    .await
-                {
-                    tracing::error!(
-                        error.cause_chain = ?e,
-                        error.message = %e,
-                        "Failed to send newsletter issue email to subscriber"
-                    );
-                    continue;
-                }
-                // TODO:
-                finished_emails.push(subscriber_email.to_string());
-            }
-            Err(e) => {
-                tracing::error!(
-                    error.cause_chain = ?e,
-                    error.message = %e,
-                    "Skip sending newsletter issue to invalid subscriber email"
-                );
-            }
+        if try_send_newsletter_issue_to_subscriber_email(
+            &subscriber_email,
+            email_client,
+            &issue_content,
+        )
+        .await
+        .is_ok()
+        {
+            finished_emails.push(subscriber_email);
         }
     }
 
-    delete_task(&mut transaction, newsletters_issue_id, finished_emails).await?;
-    update_in_progress_newsletters_issues(&mut transaction, &newsletters_issue_id).await?;
+    // TODO: handle error with retry
+    delete_tasks(&mut transaction, newsletters_issue_id, &finished_emails).await?;
     transaction.commit().await?;
+
+    let done_tasks_count: i32 = finished_emails.len() as i32;
+    update_newsletters_issue_status(pg_pool, &newsletters_issue_id, done_tasks_count).await?;
     Ok(ExecutionResult::TaskCompleted)
+}
+
+#[tracing::instrument(
+    name = "Send newsletter issue to subscriber's email",
+    skip(email_client, issue_content),
+    fields(
+        subcriber_email = %subscriber_email,
+    )
+)]
+async fn try_send_newsletter_issue_to_subscriber_email(
+    subscriber_email: &str,
+    email_client: &EmailClient,
+    issue_content: &NewslettersIssue,
+) -> Result<(), anyhow::Error> {
+    match SubscriberEmail::parse(subscriber_email.into()).map_err(|e| anyhow::anyhow!(e)) {
+        Ok(subscriber_email) => {
+            if let Err(e) = email_client
+                .send_multipart_email(
+                    &subscriber_email,
+                    &issue_content.title,
+                    &issue_content.text_content,
+                    &issue_content.html_content,
+                )
+                .await
+            {
+                tracing::error!(
+                    error.cause_chain = ?e,
+                    error.message = %e,
+                    "Failed to send newsletter issue email to subscriber"
+                );
+                return Err(e);
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                error.cause_chain = ?e,
+                error.message = %e,
+                "Skip sending newsletter issue to invalid subscriber email"
+            );
+            return Err(e);
+        }
+    }
+
+    Ok(())
 }
 
 #[tracing::instrument(
@@ -158,14 +173,14 @@ pub async fn insert_newsletters_issue(
     } = newsletters;
     sqlx::query!(
         r#"
-        INSERT INTO newsletters_issues (id, title, text_content, html_content, status, published_at)
-        VALUES ($1, $2, $3, $4, $5, now())
+        INSERT INTO newsletters_issues (id, title, text_content, html_content, status, published_at, finished_n_tasks, required_n_tasks)
+        VALUES ($1, $2, $3, $4, $5, now(), 0, 0)
         "#,
         newsletters_issue_id,
         title,
         text_content,
         html_content,
-        NewsletterIssueStatus::Pending.as_ref()
+        NewsletterIssueStatus::Available.as_ref()
     )
     .execute(transaction)
     .await?;
@@ -196,12 +211,55 @@ pub async fn enqueue_task(
     Ok(())
 }
 
-#[tracing::instrument(name = "Dequeue delivery newsletters issue into database", skip_all)]
-async fn dequeue_task(
+#[tracing::instrument(name = "Get tasks count in newsletters issue delivery queue", skip_all)]
+pub async fn get_tasks_count_in_queue(
     transaction: &mut PgTransaction,
     newsletters_issue_id: &uuid::Uuid,
+) -> Result<Option<i64>, sqlx::Error> {
+    Ok(sqlx::query!(
+        r#"
+        SELECT COUNT(*)
+        FROM newsletters_issues_delivery_queue
+        WHERE id = $1
+        "#,
+        newsletters_issue_id
+    )
+    .fetch_one(transaction)
+    .await?
+    .count)
+}
+
+#[tracing::instrument(
+    name = "Update newsletters issue require n tasks into database",
+    skip_all
+)]
+pub async fn update_newsletters_issue_require_n_tasks(
+    transaction: &mut PgTransaction,
+    newsletters_issue_id: &uuid::Uuid,
+    required_n_tasks: i32,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"
+        UPDATE newsletters_issues
+        SET required_n_tasks = $1
+        WHERE id = $2
+        "#,
+        required_n_tasks,
+        newsletters_issue_id
+    )
+    .execute(transaction)
+    .await?;
+
+    Ok(())
+}
+
+#[tracing::instrument(name = "Dequeue delivery newsletters issue into database", skip_all)]
+async fn dequeue_tasks(
+    pg_pool: &PgPool,
+    newsletters_issue_id: &uuid::Uuid,
     batch_size: i64,
-) -> Result<Vec<String>, sqlx::Error> {
+) -> Result<(PgTransaction, Vec<String>), sqlx::Error> {
+    let mut transaction = pg_pool.begin().await?;
     // Retrieve numbers of rows depending on service server supports sending batch data
     // And skip locking row that currently in process (SKIP LOCKED)
     // Lock this row if success to retrieve (FOR UPDATE)
@@ -217,21 +275,21 @@ async fn dequeue_task(
         newsletters_issue_id,
         batch_size
     )
-    .fetch_all(transaction)
+    .fetch_all(&mut transaction)
     .await?;
 
     let result: Vec<_> = result.into_iter().map(|r| r.subscriber_email).collect();
-    Ok(result)
+    Ok((transaction, result))
 }
 
 #[tracing::instrument(
     name = "Delete delivery newsletters issue from database",
     skip(transaction, newsletters_issue_id, subscriber_emails)
 )]
-async fn delete_task(
+async fn delete_tasks(
     transaction: &mut PgTransaction,
     newsletters_issue_id: uuid::Uuid,
-    subscriber_emails: Vec<String>,
+    subscriber_emails: &Vec<String>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
         r#"
@@ -239,7 +297,7 @@ async fn delete_task(
         WHERE id = $1 AND subscriber_email = ANY($2)
         "#,
         newsletters_issue_id,
-        &subscriber_emails
+        subscriber_emails
     )
     .execute(transaction)
     .await?;
@@ -315,64 +373,57 @@ async fn delete_expired_idempotency_keys(
 
 #[derive(strum::AsRefStr)]
 pub enum NewsletterIssueStatus {
-    #[strum(serialize = "PENDING")]
-    Pending,
+    #[strum(serialize = "AVAILABLE")]
+    Available,
     #[strum(serialize = "IN PROCESS")]
     InProcess,
-    #[strum(serialize = "PUBLISHED")]
-    Published,
+    #[strum(serialize = "COMPLETED")]
+    Completed,
 }
 
 #[tracing::instrument(
-    name = "Check and update in progress newsletters issue status in database",
-    skip(transaction)
+    name = "Check and update newsletters issue status in database",
+    skip(pg_pool, newsletters_issue_id, done_tasks_count)
 )]
-async fn update_in_progress_newsletters_issues(
-    transaction: &mut PgTransaction,
+async fn update_newsletters_issue_status(
+    pg_pool: &PgPool,
     newsletters_issue_id: &uuid::Uuid,
+    done_tasks_count: i32,
 ) -> Result<(), sqlx::Error> {
+    let mut transaction = pg_pool.begin().await?;
+
+    sqlx::query!(
+        r#"
+        UPDATE newsletters_issues
+        SET finished_n_tasks = finished_n_tasks + $1
+        WHERE id = $2 AND status IN ($3, $4)
+        "#,
+        done_tasks_count,
+        newsletters_issue_id,
+        NewsletterIssueStatus::Available.as_ref(),
+        NewsletterIssueStatus::InProcess.as_ref()
+    )
+    .execute(&mut transaction)
+    .await?;
+
     sqlx::query!(
         r#"
         UPDATE newsletters_issues
         SET status = $1
-        WHERE status = $2 AND id NOT IN (
-            SELECT id FROM newsletters_issues_delivery_queue WHERE id = $3
-        )
+        WHERE 
+            id = $2 AND
+            status IN ($3, $4) AND
+            finished_n_tasks = required_n_tasks
         "#,
-        NewsletterIssueStatus::Published.as_ref(),
-        NewsletterIssueStatus::InProcess.as_ref(),
-        newsletters_issue_id
+        NewsletterIssueStatus::Completed.as_ref(),
+        newsletters_issue_id,
+        NewsletterIssueStatus::Available.as_ref(),
+        NewsletterIssueStatus::InProcess.as_ref()
     )
-    .execute(transaction)
+    .execute(&mut transaction)
     .await?;
 
-    Ok(())
-}
-
-#[tracing::instrument(
-    name = "Update newsletter issue status in database",
-    skip(transaction, newsletters_issue_id),
-    fields(
-        status = %status.as_ref(),
-    )
-)]
-async fn update_newsletter_issue_status(
-    transaction: &mut PgTransaction,
-    newsletters_issue_id: &uuid::Uuid,
-    status: NewsletterIssueStatus,
-) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        r#"
-        UPDATE newsletters_issues
-        SET status = $1
-        WHERE id = $2
-        "#,
-        status.as_ref(),
-        newsletters_issue_id
-    )
-    .execute(transaction)
-    .await?;
-
+    transaction.commit().await?;
     Ok(())
 }
 
@@ -380,28 +431,23 @@ async fn update_newsletter_issue_status(
     name = "Get unfinished newsletters issues from database",
     skip(pg_pool)
 )]
-async fn get_unfinished_newsletters_issues(
+async fn get_available_newsletters_issues(
     pg_pool: &PgPool,
-) -> Result<Option<(PgTransaction, uuid::Uuid, NewslettersIssue)>, sqlx::Error> {
-    let mut transaction = pg_pool.begin().await?;
+) -> Result<Option<(uuid::Uuid, NewslettersIssue)>, sqlx::Error> {
     let result = sqlx::query!(
         r#"
         SELECT id, title, text_content, html_content 
         FROM newsletters_issues
         WHERE status IN ($1, $2)
-        FOR UPDATE
-        SKIP LOCKED
-        LIMIT 1
         "#,
-        NewsletterIssueStatus::InProcess.as_ref(),
-        NewsletterIssueStatus::Pending.as_ref()
+        NewsletterIssueStatus::Available.as_ref(),
+        NewsletterIssueStatus::InProcess.as_ref()
     )
-    .fetch_optional(&mut transaction)
+    .fetch_optional(pg_pool)
     .await?;
 
     Ok(result.map(|r| {
         (
-            transaction,
             r.id,
             NewslettersIssue {
                 title: r.title,
@@ -415,7 +461,5 @@ async fn get_unfinished_newsletters_issues(
 // TODO: e.g. adding a n_retries and
 // execute_after columns to keep track of how many attempts have already taken place and how long
 // we should wait before trying again. Try implementing it as an exercise
-
-// TODO: change to SMTP client to send emails, and add SMTP server to testing
 
 // TODO: find better way to handle deque tasks and send emails as batch

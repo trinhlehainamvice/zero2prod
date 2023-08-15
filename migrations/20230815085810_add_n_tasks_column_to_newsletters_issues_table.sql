@@ -1,0 +1,1 @@
+ALTER TABLE newsletters_issues ADD COLUMN n_tasks INT NULL;

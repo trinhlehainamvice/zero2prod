@@ -3,10 +3,14 @@ use crate::idempotency::{
     try_insert_idempotency_response_record_into_database, update_idempotency_response_record,
     ProcessState,
 };
-use crate::newsletters_issues::{enqueue_task, insert_newsletters_issue, NewslettersIssue};
+use crate::newsletters_issues::{
+    enqueue_task, get_tasks_count_in_queue, insert_newsletters_issue,
+    update_newsletters_issue_require_n_tasks, NewslettersIssue,
+};
 use crate::utils::{e400, e500, see_other};
 use actix_web::{web, HttpResponse};
 use actix_web_flash_messages::FlashMessage;
+use anyhow::Context;
 use sqlx::PgPool;
 use tokio::sync::Notify;
 
@@ -69,6 +73,20 @@ pub async fn publish_newsletters(
     enqueue_task(&mut transaction, newsletters_issue_id)
         .await
         .map_err(e500)?;
+
+    let required_n_tasks = get_tasks_count_in_queue(&mut transaction, &newsletters_issue_id)
+        .await
+        .map_err(e500)?
+        .context("Tasks count in newsletters issue delivery queue is None")
+        .map_err(e500)? as i32;
+
+    update_newsletters_issue_require_n_tasks(
+        &mut transaction,
+        &newsletters_issue_id,
+        required_n_tasks,
+    )
+    .await
+    .map_err(e500)?;
 
     FlashMessage::success("Published newsletter successfully!").send();
     let response = see_other("/admin/newsletters");

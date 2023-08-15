@@ -47,7 +47,9 @@ lettre = { version = "0.10", default-features = false, features = ["builder", "t
 
 [features]
 # Make lettre pool feature optional
-# When send message with lettre smtp transport pool, lettre open and lock connection until app use this pool match PoolConfig condition
+# When send message with lettre smtp transport pool
+# lettre open and lock connection until app use this pool match PoolConfig condition
+# and maybe letter uses the SAME LOCAL PORT every time open a connection
 # - PoolConfig set default connection timeout to 60 secs and max connections to 10
 #   - So connection will be locked until timeout 
 #   - Or match the max number of connections

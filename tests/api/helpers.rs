@@ -296,18 +296,18 @@ impl TestAppBuilder {
 }
 
 static TRACING: Lazy<()> = Lazy::new(|| {
-    let test_name = "test_app";
-    let default_log_level = "debug";
+    const TEST_NAME: &str = "test_app";
+    const DEFAULT_LOG_LEVEL: &str = "debug";
     if std::env::var("TEST_LOG").is_ok() {
         init_tracing_subscriber(get_tracing_subscriber(
-            test_name,
-            default_log_level,
+            TEST_NAME,
+            DEFAULT_LOG_LEVEL,
             std::io::stdout,
         ));
     } else {
         init_tracing_subscriber(get_tracing_subscriber(
-            test_name,
-            default_log_level,
+            TEST_NAME,
+            DEFAULT_LOG_LEVEL,
             std::io::sink,
         ));
     }
