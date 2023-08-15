@@ -160,6 +160,22 @@ async fn publish_duplicate_newsletters_in_concurrent_ret_same_response() {
         texts.push(response.text().await.unwrap());
     }
 
+    // Assert expect only one available newsletters issue in database
+    // Because we don't spawn issue delivery worker, no task is executed, or issue will be not completed
+    let n_available_issues: i64 = sqlx::query!(
+        r#"
+        SELECT COUNT(*)
+        FROM newsletters_issues
+        WHERE status = 'AVAILABLE'
+        "#,
+    )
+    .fetch_one(&app.pg_pool)
+    .await
+    .expect("Failed to fetch number of available newsletters_issues")
+    .count
+    .expect("Expect number of available newsletters_issues");
+    assert_eq!(n_available_issues, 1);
+
     // Assert expect all response contents to be the same
     assert!(texts.windows(2).all(|text| text[0] == text[1]));
 }
@@ -186,7 +202,7 @@ async fn publish_multiple_newsletters() {
         create_confirmed_subscriber(&app).await;
     }
 
-    let n_publish: u64 = (2..5).fake();
+    let n_issues: u64 = (2..5).fake();
 
     // Because each test case is executed once at a time and in order
     // So we can believe that the number of messages are not affected by another test
@@ -198,7 +214,7 @@ async fn publish_multiple_newsletters() {
         .unwrap()
         .len();
 
-    for _ in 0..n_publish {
+    for _ in 0..n_issues {
         let title: String = Sentence(10..20).fake();
         let text: String = Paragraph(50..100).fake();
         let html: String = format!("<p>{}</p>", &text);
@@ -213,8 +229,8 @@ async fn publish_multiple_newsletters() {
     }
 
     tokio::time::timeout(
-        Duration::from_secs(300),
-        app.wait_until_email_messages_match(msg_count_before_publish, n_publish as usize),
+        Duration::from_secs(10),
+        app.wait_until_completed_newsletters_issue_count_matches(n_issues as usize),
     )
     .await
     .expect("Failed to wait until email server receive expected number of requests");
@@ -226,9 +242,24 @@ async fn publish_multiple_newsletters() {
         .unwrap()
         .len();
 
+    let completed_n_issues = sqlx::query!(
+        r#"
+        SELECT COUNT(*)
+        FROM newsletters_issues
+        WHERE status = 'COMPLETED'
+        "#,
+    )
+    .fetch_one(&app.pg_pool)
+    .await
+    .expect("Failed to fetch number of completed newsletters_issues")
+    .count
+    .expect("Expect number of completed newsletters_issues");
+
+    assert_eq!(completed_n_issues, n_issues as i64);
+
     assert_eq!(
         current_msg_count - msg_count_before_publish,
-        n_publish as usize
+        (n_issues * n_subscribers) as usize
     );
 }
 
@@ -245,8 +276,10 @@ async fn idempotency_expired_and_republish_newsletter() {
 
     app.login().await;
 
-    create_confirmed_subscriber(&app).await;
-    create_confirmed_subscriber(&app).await;
+    let n_subscribers: u64 = (2..5).fake();
+    for _ in 0..n_subscribers {
+        create_confirmed_subscriber(&app).await;
+    }
 
     let newsletter_body = serde_json::json!({
         "title": "Newsletter title",
@@ -262,9 +295,11 @@ async fn idempotency_expired_and_republish_newsletter() {
         .unwrap()
         .len();
 
+    let mut n_issues = 0;
     // Act 1 publish newsletters
     let response = app.post_newsletters(&newsletter_body).await;
     assert_redirects_to(&response, "/admin/newsletters");
+    n_issues += 1;
 
     // Act 2 wait until idempotency is expired, then check idempotency key is deleted in database
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -287,10 +322,11 @@ async fn idempotency_expired_and_republish_newsletter() {
 
     let response = app.post_newsletters(&newsletter_body).await;
     assert_redirects_to(&response, "/admin/newsletters");
+    n_issues += 1;
 
     tokio::time::timeout(
-        Duration::from_secs(100),
-        app.wait_until_email_messages_match(msg_count_before_publish, 4),
+        Duration::from_secs(2),
+        app.wait_until_completed_newsletters_issue_count_matches(n_issues as usize),
     )
     .await
     .expect("Failed to wait until email server receive expected number of requests");
@@ -302,5 +338,8 @@ async fn idempotency_expired_and_republish_newsletter() {
         .unwrap()
         .len();
 
-    assert_eq!(current_msg_count - msg_count_before_publish, 4);
+    assert_eq!(
+        current_msg_count - msg_count_before_publish,
+        n_issues as usize
+    );
 }

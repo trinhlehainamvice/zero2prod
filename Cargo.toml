@@ -53,7 +53,9 @@ lettre = { version = "0.10", default-features = false, features = ["builder", "t
 # - PoolConfig set default connection timeout to 60 secs and max connections to 10
 #   - So connection will be locked until timeout 
 #   - Or match the max number of connections
-# So another app spawn in separate processes by tests need to way an app to release (unlock) pool
+# * By default tests in tests directory are run in sequence (once at a time)
+# * But maybe smtp connection pool is still opened and locked a port by a test
+# * -> Lead next test need to wait until stmp pool connection is released
 # Set required features when build project in [[bin]]
 pool = ["lettre/pool"]
 

@@ -375,8 +375,6 @@ async fn delete_expired_idempotency_keys(
 pub enum NewsletterIssueStatus {
     #[strum(serialize = "AVAILABLE")]
     Available,
-    #[strum(serialize = "IN PROCESS")]
-    InProcess,
     #[strum(serialize = "COMPLETED")]
     Completed,
 }
@@ -396,12 +394,11 @@ async fn update_newsletters_issue_status(
         r#"
         UPDATE newsletters_issues
         SET finished_n_tasks = finished_n_tasks + $1
-        WHERE id = $2 AND status IN ($3, $4)
+        WHERE id = $2 AND status = $3
         "#,
         done_tasks_count,
         newsletters_issue_id,
         NewsletterIssueStatus::Available.as_ref(),
-        NewsletterIssueStatus::InProcess.as_ref()
     )
     .execute(&mut transaction)
     .await?;
@@ -412,13 +409,12 @@ async fn update_newsletters_issue_status(
         SET status = $1
         WHERE 
             id = $2 AND
-            status IN ($3, $4) AND
+            status = $3 AND
             finished_n_tasks = required_n_tasks
         "#,
         NewsletterIssueStatus::Completed.as_ref(),
         newsletters_issue_id,
         NewsletterIssueStatus::Available.as_ref(),
-        NewsletterIssueStatus::InProcess.as_ref()
     )
     .execute(&mut transaction)
     .await?;
@@ -438,10 +434,9 @@ async fn get_available_newsletters_issues(
         r#"
         SELECT id, title, text_content, html_content 
         FROM newsletters_issues
-        WHERE status IN ($1, $2)
+        WHERE status = $1
         "#,
         NewsletterIssueStatus::Available.as_ref(),
-        NewsletterIssueStatus::InProcess.as_ref()
     )
     .fetch_optional(pg_pool)
     .await?;

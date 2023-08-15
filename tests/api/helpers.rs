@@ -104,24 +104,29 @@ impl TestApp {
             .expect("Failed to read response body.")
     }
 
-    pub async fn wait_until_email_messages_match(
-        &self,
-        msg_count_before_publish: usize,
-        n_publish: usize,
-    ) {
+    pub async fn wait_until_completed_newsletters_issue_count_matches(&self, n_issues: usize) {
         loop {
-            let current_msg_count = self
-                .get_email_messages_json()
-                .await
-                .as_array()
-                .unwrap()
-                .len();
-            if current_msg_count - msg_count_before_publish == n_publish {
+            let completed_n_issues = sqlx::query!(
+                r#"
+                SELECT COUNT(*)
+                FROM newsletters_issues
+                WHERE status = 'COMPLETED'
+                "#,
+            )
+            .fetch_one(&self.pg_pool)
+            .await
+            .expect("Failed to fetch number of completed newsletters_issues")
+            .count
+            .expect("Expect number of completed newsletters_issues");
+
+            if completed_n_issues == n_issues as i64 {
                 break;
             }
+
             tokio::time::sleep(Duration::from_millis(10)).await
         }
     }
+
     pub async fn get_email_messages_json(&self) -> serde_json::Value {
         let response = reqwest::Client::new()
             .get("http://localhost:1080/api/messages")

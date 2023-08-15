@@ -133,6 +133,7 @@ mod tests {
         100
     }
 
+    // TODO: this test depends on external dependencies (mailcrab), so it's satisfying a unit test -> need to refactor
     // NOTE: these tests depending on mailcrab to host mock smtp server
     // make sure to launch mailcrab on local machine or docker before running the tests
     // REF: https://github.com/tweedegolf/mailcrab
