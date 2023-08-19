@@ -3,7 +3,6 @@ use crate::email_client::EmailClient;
 use crate::routes::{SubscriberEmail, SubscriptionStatus};
 use crate::startup::{build_email_client, get_pg_pool};
 use sqlx::postgres::types::PgInterval;
-use sqlx::postgres::PgDatabaseError;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
@@ -476,5 +475,3 @@ async fn get_available_newsletters_issues(
 // TODO: e.g. adding a n_retries and
 // execute_after columns to keep track of how many attempts have already taken place and how long
 // we should wait before trying again. Try implementing it as an exercise
-
-// TODO: find better way to handle deque tasks and send emails as batch
