@@ -3,6 +3,7 @@ use crate::email_client::EmailClient;
 use crate::routes::{SubscriberEmail, SubscriptionStatus};
 use crate::startup::{build_email_client, get_pg_pool};
 use sqlx::postgres::types::PgInterval;
+use sqlx::postgres::PgDatabaseError;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
@@ -104,8 +105,27 @@ pub async fn try_execute_task(
         }
     }
 
-    // TODO: handle error with retry
-    delete_tasks(&mut transaction, newsletters_issue_id, &finished_emails).await?;
+    const RETRY_INTERVAL: Duration = Duration::from_secs(1);
+    const MAX_RETRIES: u32 = 5;
+    let mut n_retries = 0;
+    loop {
+        match delete_tasks(&mut transaction, newsletters_issue_id, &finished_emails).await {
+            Ok(_) => break,
+            Err(e) => match e {
+                sqlx::Error::ColumnDecode { .. }
+                | sqlx::Error::ColumnNotFound(_)
+                | sqlx::Error::TypeNotFound { .. } => return Err(anyhow::anyhow!(e)),
+                // TODO: need to research more about Postgres error codes that can be retryable
+                // sqlx::Error::Database(e) if matches!(e.try_downcast_ref::<PgDatabaseError>(), Some(e) if ["57014", "58030"].contains(&e.code())) => {}
+                _ => {}
+            },
+        }
+        n_retries += 1;
+        if n_retries > MAX_RETRIES {
+            break;
+        }
+        tokio::time::sleep(RETRY_INTERVAL).await;
+    }
     transaction.commit().await?;
 
     let done_tasks_count: i32 = finished_emails.len() as i32;
